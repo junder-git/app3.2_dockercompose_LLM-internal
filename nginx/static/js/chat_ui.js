@@ -1,7 +1,7 @@
 // UI functionality and visual elements - Updated for chat(n) format
 class ChatUI {
     constructor(chatInstance) {
-        this.chat = chatInstance;
+        this.chatInstance = chatInstance;
         this.init();
     }
     
@@ -83,7 +83,7 @@ class ChatUI {
         const chatList = document.getElementById('chat-list');
         if (!chatList) return;
         
-        const chatsArray = Array.from(this.chat.chats.values())
+        const chatsArray = Array.from(this.chatInstance.chats.values())
             .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
         
         if (chatsArray.length === 0) {
@@ -110,7 +110,7 @@ class ChatUI {
         chatItem.className = 'chat-item';
         chatItem.dataset.chatId = chat.id;
         
-        if (chat.id === this.chat.currentChatId) {
+        if (chat.id === this.chatInstance.currentChatId) {
             chatItem.classList.add('active');
         }
         
@@ -126,7 +126,7 @@ class ChatUI {
         const formattedDate = this.formatChatDate(chat.updatedAt);
         
         // Extract timestamp from chat ID for display
-        const chatTimestamp = this.chat.getChatTimestamp(chat.id);
+        const chatTimestamp = this.chatInstance.getChatTimestamp(chat.id);
         const chatDisplayId = chatTimestamp ? `chat(${chatTimestamp})` : chat.id;
         
         chatItem.innerHTML = `
@@ -151,7 +151,7 @@ class ChatUI {
         // Add click handler for switching chats
         chatItem.addEventListener('click', (e) => {
             if (!e.target.closest('.chat-item-menu')) {
-                this.chat.switchToChat(chat.id);
+                this.chatInstance.switchToChat(chat.id);
             }
         });
         
@@ -161,7 +161,7 @@ class ChatUI {
     updateChatListActiveState() {
         const chatItems = document.querySelectorAll('.chat-item');
         chatItems.forEach(item => {
-            if (item.dataset.chatId === this.chat.currentChatId) {
+            if (item.dataset.chatId === this.chatInstance.currentChatId) {
                 item.classList.add('active');
             } else {
                 item.classList.remove('active');
@@ -261,6 +261,116 @@ class ChatUI {
         buttonWrapper.appendChild(copyButton);
         
         contentDiv.appendChild(buttonWrapper);
+    }
+    
+    // Message handling methods
+    addMessage(sender, content, isStreaming = false, files = []) {
+        const messagesContainer = document.getElementById('messages-content');
+        if (!messagesContainer) return null;
+        
+        // Hide welcome prompt
+        const welcomePrompt = document.getElementById('welcome-prompt');
+        if (welcomePrompt && sender === 'user') {
+            welcomePrompt.style.display = 'none';
+        }
+        
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `message message-${sender}`;
+        
+        // Header
+        const headerDiv = document.createElement('div');
+        headerDiv.className = 'message-header';
+        
+        const avatarDiv = document.createElement('div');
+        avatarDiv.className = 'message-avatar';
+        
+        const labelSpan = document.createElement('span');
+        
+        if (sender === 'user') {
+            avatarDiv.innerHTML = '<i class="bi bi-person-circle"></i>';
+            labelSpan.textContent = 'You';
+        } else {
+            avatarDiv.innerHTML = '<i class="bi bi-robot"></i>';
+            labelSpan.textContent = 'AI Assistant';
+        }
+        
+        headerDiv.appendChild(avatarDiv);
+        headerDiv.appendChild(labelSpan);
+        
+        // Files (for user messages)
+        if (files && files.length > 0) {
+            const filesDiv = document.createElement('div');
+            filesDiv.className = 'message-files';
+            
+            files.forEach(file => {
+                const fileItem = document.createElement('div');
+                fileItem.className = 'message-file-item';
+                
+                const icon = this.fileUpload.getFileIcon(file.type);
+                const size = this.fileUpload.formatFileSize(file.size);
+                
+                fileItem.innerHTML = `
+                    <i class="bi ${icon}"></i>
+                    <span>${file.name}</span>
+                    <small>(${size})</small>
+                `;
+                
+                filesDiv.appendChild(fileItem);
+            });
+            
+            messageDiv.appendChild(headerDiv);
+            messageDiv.appendChild(filesDiv);
+        } else {
+            messageDiv.appendChild(headerDiv);
+        }
+        
+        // Content
+        const contentDiv = document.createElement('div');
+        contentDiv.className = 'message-content';
+        
+        if (sender === 'user') {
+            contentDiv.innerHTML = window.marked ? marked.parse(content) : content;
+        } else if (isStreaming) {
+            const streamDiv = document.createElement('div');
+            streamDiv.className = 'streaming-content';
+            contentDiv.appendChild(streamDiv);
+        } else {
+            contentDiv.innerHTML = window.marked ? marked.parse(content) : content;
+            this.enhanceCodeBlocks(contentDiv, content);
+        }
+        
+        messageDiv.appendChild(contentDiv);
+        messagesContainer.appendChild(messageDiv);
+        
+        // Process with artifacts system if not streaming
+        if (!isStreaming && this.currentChatId) {
+            const messageType = sender === 'user' ? 'in' : 'out';
+            this.chatInstance.artifacts.processMessageElement(messageDiv, messageType, content, files);
+            
+            // Save message to current chat
+            const chat = this.chats.get(this.currentChatId);
+            if (chat) {
+                chat.messages.push({
+                    role: sender === 'user' ? 'user' : 'ai',
+                    content: content,
+                    files: files || [],
+                    timestamp: Date.now()
+                });
+                
+                chat.updatedAt = new Date();
+                
+                // Update chat title if this is the first user message
+                if (sender === 'user' && chat.messages.filter(m => m.role === 'user').length === 1) {
+                    const newTitle = content.length > 30 ? content.substring(0, 30) + '...' : content;
+                    chat.title = newTitle;
+                    this.updateCurrentChatTitle(newTitle);
+                }
+                
+                this.updateChatList();
+            }
+        }
+        this.scrollToBottom();
+        return messageDiv;
     }
     
     async copyToClipboard(text, button) {
