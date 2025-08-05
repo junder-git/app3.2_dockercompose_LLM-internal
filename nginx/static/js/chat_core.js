@@ -138,10 +138,18 @@ class InternalChat {
         }
     }
     
+    // Improved loadChatMessages method in chat_core.js
     async loadChatMessages(chatId) {
-        // Delegate to Redis for loading, UI for rendering
+        // Delegate to Redis for loading
         const result = await this.redis.getChatHistory(chatId);
-        this.ui.renderChatMessages(result, this.artifacts);
+        
+        if (result.success && result.messages && result.messages.length > 0) {
+            // Only render if we have messages
+            this.ui.renderChatMessages(result, this.artifacts);
+        } else {
+            // Handle empty chat or error case
+            this.ui.showEmptyChat(result.error);
+        }
     }
     
     async deleteChat(chatId) {

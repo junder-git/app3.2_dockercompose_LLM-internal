@@ -348,76 +348,81 @@ class ChatUI {
             toastElement.remove();
         });
     }
-    // Render chat messages from Redis result
+    // This method now assumes messages exist and are valid
     renderChatMessages(result, artifacts) {
         const messagesContainer = document.getElementById('messages-content');
         const welcomePrompt = document.getElementById('welcome-prompt');
         
         if (!messagesContainer) return;
         
-        // Clear current messages
+        // Clear current messages and hide welcome prompt
         messagesContainer.innerHTML = '';
+        if (welcomePrompt) {
+            welcomePrompt.style.display = 'none';
+        }
         
-        if (result.success) {
-            const messages = result.messages || []; // Add fallback for undefined messages
-            console.log(`Loaded ${messages.length} messages for chat`);
+        const messages = result.messages; // We know this exists and has length > 0
+        console.log(`Rendering ${messages.length} messages for chat`);
+        
+        // Update chat title from first user message
+        const firstUserMessage = messages.find(msg => msg.role === 'user');
+        if (firstUserMessage && firstUserMessage.content) {
+            const title = firstUserMessage.content.length > 30 ? 
+                firstUserMessage.content.substring(0, 30) + '...' : 
+                firstUserMessage.content;
+            this.updateCurrentChatTitle(title);
+        }
+        
+        // Load messages and process with artifacts
+        for (const msg of messages) {
+            const messageElement = this.addMessageFromRedis(msg);
             
-            if (messages.length === 0) {
-                // Show welcome prompt for empty chats
-                if (welcomePrompt) {
-                    welcomePrompt.style.display = 'block';
-                }
-                this.updateCurrentChatTitle('New Chat');
-            } else {
-                // Hide welcome prompt and load messages
-                if (welcomePrompt) {
-                    welcomePrompt.style.display = 'none';
-                }
-                
-                // Update chat title from first user message
-                const firstUserMessage = messages.find(msg => msg && msg.role === 'user'); // Add null check
-                if (firstUserMessage) {
-                    const title = firstUserMessage.content && firstUserMessage.content.length > 30 ? 
-                        firstUserMessage.content.substring(0, 30) + '...' : 
-                        firstUserMessage.content || 'New Chat'; // Add fallback for undefined content
-                    this.updateCurrentChatTitle(title);
+            if (messageElement && msg.id) {
+                // Determine artifact type from message ID format
+                let messageType;
+                if (msg.id.startsWith('admin(')) {
+                    messageType = 'admin';
+                } else if (msg.id.startsWith('jai(')) {
+                    messageType = 'jai';
+                } else {
+                    messageType = msg.role === 'user' ? 'admin' : 'jai';
                 }
                 
-                // Load messages and process with artifacts
-                for (const msg of messages) {
-                    if (!msg) continue; // Skip null/undefined messages
-                    
-                    const messageElement = this.addMessageFromRedis(msg);
-                    
-                    if (messageElement && msg.id) {
-                        // Determine artifact type from message ID format
-                        let messageType;
-                        if (msg.id.startsWith('admin(')) {
-                            messageType = 'admin';
-                        } else if (msg.id.startsWith('jai(')) {
-                            messageType = 'jai';
-                        } else {
-                            messageType = msg.role === 'user' ? 'admin' : 'jai';
-                        }
-                        
-                        artifacts.processMessageElement(
-                            messageElement, 
-                            messageType, 
-                            msg.content || '', // Add fallback for undefined content
-                            msg.files || [], 
-                            msg.id
-                        );
-                    }
-                }
-                
-                this.scrollToBottom();
+                artifacts.processMessageElement(
+                    messageElement, 
+                    messageType, 
+                    msg.content, 
+                    msg.files || [], 
+                    msg.id
+                );
             }
-        } else {
-            console.error('Failed to load chat messages:', result.error);
-            if (welcomePrompt) {
-                welcomePrompt.style.display = 'block';
-            }
+        }
+        
+        this.scrollToBottom();
+    }
+
+    // New method to handle empty chat state
+    showEmptyChat(error = null) {
+        const messagesContainer = document.getElementById('messages-content');
+        const welcomePrompt = document.getElementById('welcome-prompt');
+        
+        // Clear messages
+        if (messagesContainer) {
+            messagesContainer.innerHTML = '';
+        }
+        
+        // Show welcome prompt
+        if (welcomePrompt) {
+            welcomePrompt.style.display = 'block';
+        }
+        
+        // Update title based on state
+        if (error) {
+            console.error('Failed to load chat messages:', error);
             this.updateCurrentChatTitle('Error Loading Chat');
+            this.showToast('Failed to load chat messages', 'error');
+        } else {
+            this.updateCurrentChatTitle('New Chat');
         }
     }
 
