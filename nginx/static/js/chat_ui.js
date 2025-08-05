@@ -263,116 +263,6 @@ class ChatUI {
         contentDiv.appendChild(buttonWrapper);
     }
     
-    // Message handling methods
-    addMessage(sender, content, isStreaming = false, files = []) {
-        const messagesContainer = document.getElementById('messages-content');
-        if (!messagesContainer) return null;
-        
-        // Hide welcome prompt
-        const welcomePrompt = document.getElementById('welcome-prompt');
-        if (welcomePrompt && sender === 'user') {
-            welcomePrompt.style.display = 'none';
-        }
-        
-        const messageDiv = document.createElement('div');
-        messageDiv.className = `message message-${sender}`;
-        
-        // Header
-        const headerDiv = document.createElement('div');
-        headerDiv.className = 'message-header';
-        
-        const avatarDiv = document.createElement('div');
-        avatarDiv.className = 'message-avatar';
-        
-        const labelSpan = document.createElement('span');
-        
-        if (sender === 'user') {
-            avatarDiv.innerHTML = '<i class="bi bi-person-circle"></i>';
-            labelSpan.textContent = 'You';
-        } else {
-            avatarDiv.innerHTML = '<i class="bi bi-robot"></i>';
-            labelSpan.textContent = 'AI Assistant';
-        }
-        
-        headerDiv.appendChild(avatarDiv);
-        headerDiv.appendChild(labelSpan);
-        
-        // Files (for user messages)
-        if (files && files.length > 0) {
-            const filesDiv = document.createElement('div');
-            filesDiv.className = 'message-files';
-            
-            files.forEach(file => {
-                const fileItem = document.createElement('div');
-                fileItem.className = 'message-file-item';
-                
-                const icon = this.fileUpload.getFileIcon(file.type);
-                const size = this.fileUpload.formatFileSize(file.size);
-                
-                fileItem.innerHTML = `
-                    <i class="bi ${icon}"></i>
-                    <span>${file.name}</span>
-                    <small>(${size})</small>
-                `;
-                
-                filesDiv.appendChild(fileItem);
-            });
-            
-            messageDiv.appendChild(headerDiv);
-            messageDiv.appendChild(filesDiv);
-        } else {
-            messageDiv.appendChild(headerDiv);
-        }
-        
-        // Content
-        const contentDiv = document.createElement('div');
-        contentDiv.className = 'message-content';
-        
-        if (sender === 'user') {
-            contentDiv.innerHTML = window.marked ? marked.parse(content) : content;
-        } else if (isStreaming) {
-            const streamDiv = document.createElement('div');
-            streamDiv.className = 'streaming-content';
-            contentDiv.appendChild(streamDiv);
-        } else {
-            contentDiv.innerHTML = window.marked ? marked.parse(content) : content;
-            this.enhanceCodeBlocks(contentDiv, content);
-        }
-        
-        messageDiv.appendChild(contentDiv);
-        messagesContainer.appendChild(messageDiv);
-        
-        // Process with artifacts system if not streaming
-        if (!isStreaming && this.currentChatId) {
-            const messageType = sender === 'user' ? 'in' : 'out';
-            this.chatInstance.artifacts.processMessageElement(messageDiv, messageType, content, files);
-            
-            // Save message to current chat
-            const chat = this.chats.get(this.currentChatId);
-            if (chat) {
-                chat.messages.push({
-                    role: sender === 'user' ? 'user' : 'ai',
-                    content: content,
-                    files: files || [],
-                    timestamp: Date.now()
-                });
-                
-                chat.updatedAt = new Date();
-                
-                // Update chat title if this is the first user message
-                if (sender === 'user' && chat.messages.filter(m => m.role === 'user').length === 1) {
-                    const newTitle = content.length > 30 ? content.substring(0, 30) + '...' : content;
-                    chat.title = newTitle;
-                    this.updateCurrentChatTitle(newTitle);
-                }
-                
-                this.updateChatList();
-            }
-        }
-        this.scrollToBottom();
-        return messageDiv;
-    }
-    
     async copyToClipboard(text, button) {
         try {
             await navigator.clipboard.writeText(text);
@@ -485,8 +375,7 @@ class ChatUI {
         
         // Load messages and process with artifacts
         for (const msg of messages) {
-            const messageElement = this.addMessageFromRedis(msg);
-            
+            const messageElement = this.addMessage(msg.id, msg);//EDIT            
             if (messageElement && msg.id) {
                 // Determine artifact type from message ID format
                 let messageType;
@@ -628,6 +517,130 @@ class ChatUI {
                 this.scrollToBottom();
             }
         }
+    }
+
+    // Message handling methods
+    addMessage(sender, content, isStreaming = false, files = []) {
+        const messagesContainer = document.getElementById('messages-content');
+        if (!messagesContainer) return null;
+        
+        const messageElement = document.createElement('div');
+        messageElement.className = `message message-${msg.role}`;
+        
+        const timestamp = new Date(msg.timestamp * 1000).toLocaleTimeString();
+        const roleLabel = msg.role === 'user' ? 'You' : msg.role === 'assistant' ? 'JAI' : 'System';
+        
+        messageElement.innerHTML = `
+            <div class="message-header">
+                <div class="message-role">${roleLabel}</div>
+                <div class="message-time">${timestamp}</div>
+            </div>
+            <div class="message-content"></div>
+        `;
+                
+        // Hide welcome prompt
+        const welcomePrompt = document.getElementById('welcome-prompt');
+        if (welcomePrompt && sender === 'user') {
+            welcomePrompt.style.display = 'none';
+        }
+        
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `message message-${sender}`;
+        
+        // Header
+        const headerDiv = document.createElement('div');
+        headerDiv.className = 'message-header';
+        
+        const avatarDiv = document.createElement('div');
+        avatarDiv.className = 'message-avatar';
+        
+        const labelSpan = document.createElement('span');
+        
+        if (sender === 'user') {
+            avatarDiv.innerHTML = '<i class="bi bi-person-circle"></i>';
+            labelSpan.textContent = 'You';
+        } else {
+            avatarDiv.innerHTML = '<i class="bi bi-robot"></i>';
+            labelSpan.textContent = 'AI Assistant';
+        }
+        
+        headerDiv.appendChild(avatarDiv);
+        headerDiv.appendChild(labelSpan);
+        
+        // Files (for user messages)
+        if (files && files.length > 0) {
+            const filesDiv = document.createElement('div');
+            filesDiv.className = 'message-files';
+            
+            files.forEach(file => {
+                const fileItem = document.createElement('div');
+                fileItem.className = 'message-file-item';
+                
+                const icon = this.fileUpload.getFileIcon(file.type);
+                const size = this.fileUpload.formatFileSize(file.size);
+                
+                fileItem.innerHTML = `
+                    <i class="bi ${icon}"></i>
+                    <span>${file.name}</span>
+                    <small>(${size})</small>
+                `;
+                
+                filesDiv.appendChild(fileItem);
+            });
+            
+            messageDiv.appendChild(headerDiv);
+            messageDiv.appendChild(filesDiv);
+        } else {
+            messageDiv.appendChild(headerDiv);
+        }
+        
+        // Content
+        const contentDiv = document.createElement('div');
+        contentDiv.className = 'message-content';
+        
+        if (sender === 'user') {
+            contentDiv.innerHTML = window.marked ? marked.parse(content) : content;
+        } else if (isStreaming) {
+            const streamDiv = document.createElement('div');
+            streamDiv.className = 'streaming-content';
+            contentDiv.appendChild(streamDiv);
+        } else {
+            contentDiv.innerHTML = window.marked ? marked.parse(content) : content;
+            this.enhanceCodeBlocks(contentDiv, content);
+        }
+        
+        messageDiv.appendChild(contentDiv);
+        messagesContainer.appendChild(messageDiv);
+        
+        // Process with artifacts system if not streaming
+        if (!isStreaming && this.currentChatId) {
+            const messageType = sender === 'user' ? 'in' : 'out';
+            this.chatInstance.artifacts.processMessageElement(messageDiv, messageType, content, files);
+            
+            // Save message to current chat
+            const chat = this.chats.get(this.currentChatId);
+            if (chat) {
+                chat.messages.push({
+                    role: sender === 'user' ? 'user' : 'ai',
+                    content: content,
+                    files: files || [],
+                    timestamp: Date.now()
+                });
+                
+                chat.updatedAt = new Date();
+                
+                // Update chat title if this is the first user message
+                if (sender === 'user' && chat.messages.filter(m => m.role === 'user').length === 1) {
+                    const newTitle = content.length > 30 ? content.substring(0, 30) + '...' : content;
+                    chat.title = newTitle;
+                    this.updateCurrentChatTitle(newTitle);
+                }
+                
+                this.updateChatList();
+            }
+        }
+        this.scrollToBottom();
+        return messageDiv;
     }
 
     // Add message from Redis data

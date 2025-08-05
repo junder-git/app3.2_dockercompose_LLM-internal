@@ -193,6 +193,7 @@ class InternalChat {
         
         // Add user message to UI
         this.ui.addMessage('user', messageContent, false, filesToSend);
+        //this.ui.addMessageFromRedis(messageContent)
         
         // Clear input and files
         input.value = '';
