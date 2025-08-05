@@ -524,21 +524,17 @@ class ChatUI {
         const messagesContainer = document.getElementById('messages-content');
         if (!messagesContainer) return null;
         
-        const messageElement = document.createElement('div');
-        messageElement.className = `message message-${sender}`;
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `message message-${sender}`;
         const roleLabel = sender === 'user' ? 'You' : sender === 'assistant' ? 'JAI' : 'System';
         
-        messageElement.innerHTML = `
+        messageDiv.innerHTML = `
             <div class="message-header">
                 <div class="message-role">${roleLabel}</div>
                 <div class="message-time">${Date.now()}</div>
             </div>
             <div class="message-content"></div>
         `;
-        
-        const messageDiv = document.createElement('div');
-        messageDiv.className = `message message-${sender}`;
-        
         // Header
         const headerDiv = document.createElement('div');
         headerDiv.className = 'message-header';
@@ -627,11 +623,9 @@ class ChatUI {
                     chat.title = newTitle;
                     this.updateCurrentChatTitle(newTitle);
                 }
-                
                 this.updateChatList();
-                this.chatInstance.loadChatMessages(this.chatInstance.currentChatId)
             }
         }
-        return messageElement
+        return messageDiv
     }
 }

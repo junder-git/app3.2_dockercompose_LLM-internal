@@ -215,6 +215,7 @@ class InternalChat {
             
             if (stream.content) {
                 //this.ui.addMessage('assistant', stream.content, false);
+                this.loadChatMessages(stream.chatId)
                 this.ui.updateCurrentChatTitle(this.ollama.generateTitle(message));
             }
             
