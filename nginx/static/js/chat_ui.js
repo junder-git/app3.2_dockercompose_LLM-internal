@@ -359,7 +359,7 @@ class ChatUI {
         messagesContainer.innerHTML = '';
         
         if (result.success) {
-            const messages = result.messages;
+            const messages = result.messages || []; // Add fallback for undefined messages
             console.log(`Loaded ${messages.length} messages for chat`);
             
             if (messages.length === 0) {
@@ -375,16 +375,18 @@ class ChatUI {
                 }
                 
                 // Update chat title from first user message
-                const firstUserMessage = messages.find(msg => msg.role === 'user');
+                const firstUserMessage = messages.find(msg => msg && msg.role === 'user'); // Add null check
                 if (firstUserMessage) {
-                    const title = firstUserMessage.content.length > 30 ? 
+                    const title = firstUserMessage.content && firstUserMessage.content.length > 30 ? 
                         firstUserMessage.content.substring(0, 30) + '...' : 
-                        firstUserMessage.content;
+                        firstUserMessage.content || 'New Chat'; // Add fallback for undefined content
                     this.updateCurrentChatTitle(title);
                 }
                 
                 // Load messages and process with artifacts
                 for (const msg of messages) {
+                    if (!msg) continue; // Skip null/undefined messages
+                    
                     const messageElement = this.addMessageFromRedis(msg);
                     
                     if (messageElement && msg.id) {
@@ -401,7 +403,7 @@ class ChatUI {
                         artifacts.processMessageElement(
                             messageElement, 
                             messageType, 
-                            msg.content, 
+                            msg.content || '', // Add fallback for undefined content
                             msg.files || [], 
                             msg.id
                         );
