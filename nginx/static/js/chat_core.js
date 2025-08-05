@@ -190,7 +190,7 @@ class InternalChat {
         
         // Prepare message - delegate to Ollama for formatting
         const { messageContent, filesToSend } = this.ollama.prepareMessage(message, this.fileUpload.attachedFiles);
-        
+        messageContent.content = messageContent
         // Add user message to UI
         this.ui.addMessage('user', messageContent, false, filesToSend);
         //this.ui.addMessageFromRedis(messageContent)
@@ -217,14 +217,15 @@ class InternalChat {
             }
             
             if (stream.content) {
-                this.ui.addMessage('assistant', stream.content, false);
+                this.ui.addMessage('assistant', stream, false);
                 this.ui.updateCurrentChatTitle(this.ollama.generateTitle(message));
             }
             
         } catch (error) {
             // Delegate error handling to Ollama and UI
             const errorInfo = this.ollama.classifyError(error);
-            this.ui.addMessage('system', `Error: ${errorInfo.userFriendly}`, true);
+            error.content = `Error: ${errorInfo.userFriendly}`
+            this.ui.addMessage('system', error, true);
             this.ui.showToast(errorInfo.userFriendly, 'error');
         } finally {
             this.setTypingState(false);
