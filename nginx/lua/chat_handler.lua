@@ -16,6 +16,12 @@ local MODEL_NUM_PREDICT = tonumber(os.getenv("MODEL_NUM_PREDICT") or "512")
 -- User ID (always admin1 for internal)
 local USER_ID = "admin1"
 
+-- Generate chat ID in chat(n) format where n is timestamp
+local function generate_chat_id()
+    local timestamp = ngx.time() * 1000 + math.floor(ngx.var.msec or 0)
+    return "chat(" .. timestamp .. ")"
+end
+
 -- Helper function to format files for AI context
 local function format_files_for_context(files)
     if not files or #files == 0 then
@@ -193,6 +199,46 @@ function _M.serve_chat_page()
     ngx.say(content)
 end
 
+-- NEW: Create new chat endpoint
+function _M.handle_create_chat()
+    if ngx.req.get_method() ~= "POST" then
+        ngx.status = 405
+        ngx.say(cjson.encode({error = "Method not allowed"}))
+        return
+    end
+    
+    ngx.header["Content-Type"] = "application/json"
+    
+    local redis = redis_client.connect()
+    if not redis then
+        ngx.status = 500
+        ngx.say(cjson.encode({error = "Redis connection failed"}))
+        return
+    end
+    
+    -- Generate new chat ID
+    local chat_id = generate_chat_id()
+    
+    -- Create empty chat metadata
+    local chat_meta_key = "chat:meta:" .. USER_ID .. ":" .. chat_id
+    local chat_meta = {
+        id = chat_id,
+        last_updated = ngx.time(),
+        message_count = 0,
+        last_message_preview = ""
+    }
+    redis:set(chat_meta_key, cjson.encode(chat_meta))
+    redis:expire(chat_meta_key, 86400 * 365)
+    
+    redis_client.close(redis)
+    
+    ngx.say(cjson.encode({
+        success = true,
+        chat_id = chat_id,
+        created_at = ngx.time()
+    }))
+end
+
 -- Get chat history with proper message structure and artifact IDs
 function _M.handle_chat_history()
     ngx.header["Content-Type"] = "application/json"
@@ -216,7 +262,10 @@ function _M.handle_chat_history()
     local messages = get_chat_messages(redis, chat_id, 100)
     
     redis_client.close(redis)
-    ngx.say(cjson.encode({messages = messages}))
+    ngx.say(cjson.encode({
+        messages = messages,
+        chat_id = chat_id
+    }))
 end
 
 -- Get message details including artifacts
@@ -611,12 +660,12 @@ function _M.handle_chat_stream()
     
     local user_message = request_data.message or ""
     local files = request_data.files or {}
-    local chat_id = request_data.chat_id
+    local chat_id = request_data.chat_id  -- Now accepts chat_id from client
     
+    -- If no chat_id provided, generate one server-side
     if not chat_id or chat_id == "" then
-        ngx.status = 400
-        ngx.say("Missing chat_id")
-        return
+        chat_id = generate_chat_id()
+        ngx.log(ngx.INFO, "Generated new chat_id: ", chat_id)
     end
     
     -- If no message and no files, return error
@@ -660,6 +709,10 @@ function _M.handle_chat_stream()
     ngx.header["Cache-Control"] = "no-cache"
     ngx.header["Connection"] = "keep-alive"
     ngx.header["Access-Control-Allow-Origin"] = "*"
+    
+    -- Send chat_id to client first
+    ngx.say("data: " .. cjson.encode({chat_id = chat_id}) .. "\n")
+    ngx.flush()
     
     -- Create HTTP client for Ollama
     local httpc = http.new()
