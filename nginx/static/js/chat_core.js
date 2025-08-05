@@ -190,7 +190,7 @@ class InternalChat {
         // Prepare message - delegate to Ollama for formatting
         const { messageContent, filesToSend } = this.ollama.prepareMessage(message, this.fileUpload.attachedFiles);
         // Add user message to UI
-        //this.ui.addMessage('user', messageContent, false, filesToSend);
+        this.ui.addMessage('user', messageContent, false, filesToSend);
         
         // Clear input and files
         input.value = '';
