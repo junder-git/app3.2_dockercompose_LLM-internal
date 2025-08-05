@@ -637,7 +637,6 @@ class ChatUI {
                 this.updateChatList();
             }
         }
-        this.renderChatMessages();
-        return messageDiv;
+        return this.renderChatMessages();
     }
 }
