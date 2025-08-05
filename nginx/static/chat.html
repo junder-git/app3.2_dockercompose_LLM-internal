@@ -182,14 +182,26 @@
                             <input type="text" class="form-control" id="artifact-search" placeholder="Search artifacts...">
                         </div>
                         <!-- Updated artifact type filter in the modal -->
-                    <div class="col-md-3">
-                        <select class="form-select" id="artifact-type-filter">
-                            <option value="">All Types</option>
-                            <option value="admin">Admin Messages (admin)</option>
-                            <option value="jai">JAI Messages (jai)</option>
-                            <option value="code_block">Code Blocks</option>
-                        </select>
-                    </div>
+                        <div class="artifacts-panel-filters mb-3">
+                            <div class="row g-3">
+                                <div class="col-md-8">
+                                    <div class="input-group">
+                                        <span class="input-group-text">
+                                            <i class="bi bi-search"></i>
+                                        </span>
+                                        <input type="text" id="artifact-search" class="form-control" placeholder="Search artifacts by ID or content...">
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <select id="artifact-type-filter" class="form-select">
+                                        <option value="">All Types</option>
+                                        <option value="admin">Admin Messages</option>
+                                        <option value="jai">AI Messages</option>
+                                        <option value="code_block">Code Blocks</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
                     <!-- Updated stats cards -->
                     <div class="row mb-3">
                         <div class="col-md-3">

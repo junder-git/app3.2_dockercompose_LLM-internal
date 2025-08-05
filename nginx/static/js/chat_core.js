@@ -277,31 +277,58 @@ class InternalChat {
     
     // NEW: Open artifacts panel with default filters (small button)
     openArtifactsPanel() {
-        // Open artifacts panel with no pre-selected filters
-        if (this.artifacts && this.artifacts.openPanel) {
-            this.artifacts.openPanel();
+        if (window.artifactsPanel && typeof window.artifactsPanel.show === 'function') {
+            window.artifactsPanel.show();
         } else {
             this.ui.showToast('Artifacts panel not available', 'warning');
+            console.error('window.artifactsPanel not found or show method unavailable');
         }
     }
     
     // NEW: Open artifacts panel with AI and Code filters pre-selected (large button)
     openCodeAiArtifactsPanel() {
-        // Open artifacts panel with AI and Code types pre-selected
-        if (this.artifacts && this.artifacts.openPanelWithFilters) {
-            this.artifacts.openPanelWithFilters(['ai', 'code']);
-        } else if (this.artifacts && this.artifacts.openPanel) {
-            // Fallback: open panel and try to set filters after
-            this.artifacts.openPanel();
+        if (window.artifactsPanel && typeof window.artifactsPanel.show === 'function') {
+            // Open the panel first
+            window.artifactsPanel.show();
             
-            // Try to set filters after a short delay
+            // Set filters after a short delay to ensure panel is loaded
             setTimeout(() => {
-                if (this.artifacts.setActiveFilters) {
-                    this.artifacts.setActiveFilters(['ai', 'code']);
-                }
-            }, 100);
+                this.setArtifactsFilters(['jai', 'code_block']);
+            }, 300);
         } else {
             this.ui.showToast('Artifacts panel not available', 'warning');
+            console.error('window.artifactsPanel not found or show method unavailable');
+        }
+    }
+    
+    // Helper method to set filters in the artifacts panel
+    setArtifactsFilters(types) {
+        try {
+            // Set the type filter dropdown
+            const typeFilter = document.getElementById('artifact-type-filter');
+            if (typeFilter && types.length === 1) {
+                // If only one type, set it directly
+                typeFilter.value = types[0];
+                
+                // Trigger the change event to apply the filter
+                const changeEvent = new Event('change', { bubbles: true });
+                typeFilter.dispatchEvent(changeEvent);
+                
+                this.ui.showToast(`Filtered to ${types[0] === 'jai' ? 'AI messages' : types[0] === 'code_block' ? 'code blocks' : types[0]}`, 'info');
+            } else if (typeFilter && types.length > 1) {
+                // For multiple types, we'll need to handle this differently
+                // Since the filter dropdown only supports one type at a time,
+                // we'll filter to 'code_block' as it's more specific
+                const preferredType = types.includes('code_block') ? 'code_block' : types[0];
+                typeFilter.value = preferredType;
+                
+                const changeEvent = new Event('change', { bubbles: true });
+                typeFilter.dispatchEvent(changeEvent);
+                
+                this.ui.showToast(`Filtered to ${preferredType === 'code_block' ? 'code blocks' : 'AI messages'}`, 'info');
+            }
+        } catch (error) {
+            console.error('Error setting artifacts filters:', error);
         }
     }
     

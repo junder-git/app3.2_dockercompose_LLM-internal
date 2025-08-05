@@ -53,7 +53,20 @@ class ChatArtifactsPanel {
         if (!window.chat || !window.chat.artifacts) return;
         
         try {
-            const stats = await window.chat.artifacts.getStats();
+            const allArtifacts = await window.chat.artifacts.getAllArtifacts();
+            
+            // Count artifacts properly
+            const messageArtifacts = allArtifacts.filter(a => !a.id.includes('_code('));
+            const codeBlockArtifacts = allArtifacts.filter(a => a.id.includes('_code('));
+            const adminMessages = allArtifacts.filter(a => a.type === 'admin' && !a.id.includes('_code('));
+            const jaiMessages = allArtifacts.filter(a => a.type === 'jai' && !a.id.includes('_code('));
+            
+            const stats = {
+                messages: messageArtifacts.length,
+                adminMessages: adminMessages.length,
+                jaiMessages: jaiMessages.length,
+                codeBlocks: codeBlockArtifacts.length
+            };
             
             // Update stats display
             const totalElement = document.getElementById('total-messages');
@@ -121,17 +134,22 @@ class ChatArtifactsPanel {
         const item = document.createElement('div');
         item.className = 'artifact-item border rounded p-3 mb-2';
         item.dataset.artifactId = artifact.id;
-        item.dataset.artifactType = artifact.type;
         
-        const typeIcon = this.getArtifactTypeIcon(artifact.type);
-        const typeLabel = this.getArtifactTypeLabel(artifact.type);
+        // FIXED: Determine if this is a code block by ID format, not by type field
+        const isCodeBlock = artifact.id.includes('_code(');
+        const displayType = isCodeBlock ? 'code_block' : artifact.type;
+        
+        item.dataset.artifactType = displayType;
+        
+        const typeIcon = this.getArtifactTypeIcon(displayType);
+        const typeLabel = this.getArtifactTypeLabel(displayType);
         const timestamp = new Date(artifact.timestamp * 1000).toLocaleString();
         
         let content = '';
         let preview = '';
         
-        if (artifact.type === 'code_block') {
-            content = artifact.code || '';
+        if (isCodeBlock) {
+            content = artifact.code || artifact.content || '';
             preview = content.length > 100 ? content.substring(0, 100) + '...' : content;
         } else {
             content = artifact.content || '';
