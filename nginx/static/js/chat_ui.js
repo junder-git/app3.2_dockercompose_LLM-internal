@@ -535,12 +535,6 @@ class ChatUI {
             </div>
             <div class="message-content"></div>
         `;
-                
-        // Hide welcome prompt
-        const welcomePrompt = document.getElementById('welcome-prompt');
-        if (welcomePrompt && sender === 'user') {
-            welcomePrompt.style.display = 'none';
-        }
         
         const messageDiv = document.createElement('div');
         messageDiv.className = `message message-${sender}`;
