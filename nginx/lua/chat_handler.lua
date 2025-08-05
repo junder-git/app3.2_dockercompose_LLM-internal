@@ -790,13 +790,13 @@ function _M.handle_chat_stream()
     ngx.flush()
     
     -- Generate JAI message ID and save response with artifacts
-    local ai_message_id = generate_message_id(redis, chat_id, "ai")
+    local ai_message_id = generate_message_id(redis, chat_id, "assistant")
     
     -- Extract and save code blocks as artifacts
     local artifacts = extract_and_save_code_blocks(redis, chat_id, ai_message_id, full_response)
     
     -- Save AI message with artifact references
-    save_message(redis, chat_id, ai_message_id, "ai", full_response, {}, artifacts)
+    save_message(redis, chat_id, ai_message_id, "assistant", full_response, {}, artifacts)
     
     redis_client.close(redis)
     httpc:close()
