@@ -1,0 +1,68 @@
+/* Code blocks */
+.message-content pre {
+    background: #2d2d2d;
+    border-radius: 8px;
+    padding: 1rem;
+    overflow-x: auto;
+    margin: 1rem 0;
+    border: 1px solid var(--border-color);
+    position: relative;
+}
+
+.message-content code {
+    background: rgba(0, 0, 0, 0.3);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: 'SF Mono', Monaco, monospace;
+    font-size: 13px;
+}
+
+.message-content pre code {
+    background: transparent;
+    padding: 0;
+    color: #cccccc;
+}
+
+/* Code block copy button styles */
+.code-copy-btn {
+    position: absolute !important;
+    top: 8px !important;
+    right: 8px !important;
+    z-index: 10 !important;
+    padding: 4px 8px !important;
+    font-size: 12px !important;
+    opacity: 0.7 !important;
+    transition: opacity 0.2s ease !important;
+    background: var(--bg-tertiary) !important;
+    border: 1px solid var(--border-color) !important;
+    color: var(--text-secondary) !important;
+    border-radius: 4px !important;
+}
+
+.code-copy-btn:hover {
+    opacity: 1 !important;
+    background: var(--bg-primary) !important;
+    color: var(--text-primary) !important;
+    border-color: var(--primary-color) !important;
+}
+
+.code-copy-btn.text-success {
+    color: var(--success-color) !important;
+    border-color: var(--success-color) !important;
+}
+
+/* Hover effect for code blocks to show copy button */
+.message-content pre:hover .code-copy-btn {
+    opacity: 1 !important;
+}
+
+/* Mobile responsive adjustments for code blocks */
+@media (max-width: 768px) {
+    .code-copy-btn {
+        opacity: 1 !important;
+        top: 4px !important;
+        right: 4px !important;
+        padding: 2px 6px !important;
+        font-size: 10px !important;
+    }
+}

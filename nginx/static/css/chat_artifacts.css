@@ -1,0 +1,148 @@
+/* Artifact ID Badges */
+.artifact-id-badge {
+    display: inline-block;
+    padding: 2px 6px;
+    margin-left: 8px;
+    font-size: 10px;
+    font-weight: 500;
+    border-radius: 4px;
+    cursor: pointer;
+    user-select: none;
+    transition: all 0.2s ease;
+    font-family: monospace;
+}
+
+.artifact-id-in {
+    background: rgba(13, 110, 253, 0.2);
+    color: #0d6efd;
+    border: 1px solid rgba(13, 110, 253, 0.3);
+}
+
+.artifact-id-out {
+    background: rgba(25, 135, 84, 0.2);
+    color: #198754;
+    border: 1px solid rgba(25, 135, 84, 0.3);
+}
+
+.artifact-id-code {
+    background: rgba(0, 0, 0, 0.7);
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    z-index: 11;
+}
+
+.artifact-id-badge:hover {
+    transform: scale(1.05);
+    opacity: 0.8;
+}
+
+.artifact-id-badge:active {
+    transform: scale(0.95);
+}
+
+/* Artifact Panel Styles */
+.artifact-item {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color) !important;
+    transition: all 0.2s ease;
+}
+
+.artifact-item:hover {
+    border-color: var(--primary-color) !important;
+    background: var(--bg-secondary);
+}
+
+.artifact-id {
+    font-family: monospace;
+    color: var(--primary-color);
+}
+
+.artifact-content-preview {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    padding: 8px;
+    border-radius: 4px;
+    display: block;
+    width: 100%;
+    max-height: 80px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.artifact-actions .btn {
+    margin-left: 4px;
+}
+
+/* Toast container */
+#toast-container {
+    z-index: 9999;
+}
+
+/* Artifact panel modal customizations */
+#artifactPanelModal .modal-dialog {
+    max-width: 90vw;
+}
+
+#artifactPanelModal .artifact-list {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1rem;
+}
+
+/* Stats cards in artifact panel */
+#artifactPanelModal .card {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+}
+
+#artifactPanelModal .card-body h4 {
+    margin: 0;
+    font-weight: bold;
+}
+
+#artifactPanelModal .card-body h6 {
+    margin: 0 0 8px 0;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+/* Dark theme adjustments */
+@media (prefers-color-scheme: dark) {
+    .artifact-id-in {
+        background: rgba(13, 110, 253, 0.3);
+        color: #66b3ff;
+    }
+    
+    .artifact-id-out {
+        background: rgba(25, 135, 84, 0.3);
+        color: #66d9a3;
+    }
+}
+
+/* Mobile responsive adjustments for artifact panel */
+@media (max-width: 768px) {
+    #artifactPanelModal .modal-dialog {
+        max-width: 95vw;
+        margin: 1rem;
+    }
+    
+    .artifact-actions {
+        margin-top: 8px;
+    }
+    
+    .artifact-actions .btn {
+        margin: 2px;
+        padding: 4px 8px;
+        font-size: 12px;
+    }
+    
+    .artifact-content-preview {
+        font-size: 12px;
+        max-height: 60px;
+    }
+}
