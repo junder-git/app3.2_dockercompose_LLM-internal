@@ -192,7 +192,7 @@ class InternalChat {
         const { messageContent, filesToSend } = this.ollama.prepareMessage(message, this.fileUpload.attachedFiles);
         
         // Add user message to UI
-        this.ui.addMessage('user', messageContent, false, filesToSend);
+        //this.ui.addMessage('user', messageContent, false, filesToSend);
         
         // Clear input and files
         input.value = '';
@@ -216,14 +216,14 @@ class InternalChat {
             }
             
             if (stream.content) {
-                this.ui.addMessage('assistant', stream.content, false);
+                //this.ui.addMessage('assistant', stream.content, false);
                 this.ui.updateCurrentChatTitle(this.ollama.generateTitle(message));
             }
             
         } catch (error) {
             // Delegate error handling to Ollama and UI
             const errorInfo = this.ollama.classifyError(error);
-            this.ui.addMessage('system', `Error: ${errorInfo.userFriendly}`, true);
+            //this.ui.addMessage('system', `Error: ${errorInfo.userFriendly}`, true);
             this.ui.showToast(errorInfo.userFriendly, 'error');
         } finally {
             this.setTypingState(false);
