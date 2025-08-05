@@ -567,11 +567,8 @@ class ChatUI {
             this.enhanceCodeBlocks(contentDiv, content);
         }
         
-        messageDiv.appendChild(contentDiv);
-        messagesContainer.appendChild(messageDiv);
-        
         // Process with artifacts system if not streaming
-        if (!isStreaming && this.currentChatId) {
+        if (!isStreaming && this.chatInstance.currentChatId) {
             const messageType = sender === 'user' ? 'in' : 'out';
             this.chatInstance.artifacts.processMessageElement(messageDiv, messageType, content, files);
             
