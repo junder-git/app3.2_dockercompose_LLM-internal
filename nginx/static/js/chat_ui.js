@@ -519,16 +519,16 @@ class ChatUI {
         }
     }
 
-    // Message handling methods, sender seems to be nested also as content.role
+    // Message handling methods
     addMessage(sender, content, isStreaming = false, files = []) {
         const messagesContainer = document.getElementById('messages-content');
         if (!messagesContainer) return null;
         
         const messageElement = document.createElement('div');
-        messageElement.className = `message message-${role}`;
+        messageElement.className = `message message-${sender}`;
         
         const timestamp = new Date(timestamp * 1000).toLocaleTimeString();
-        const roleLabel = role === 'user' ? 'You' : role === 'assistant' ? 'JAI' : 'System';
+        const roleLabel = sender === 'user' ? 'You' : sender === 'assistant' ? 'JAI' : 'System';
         
         messageElement.innerHTML = `
             <div class="message-header">
@@ -637,6 +637,7 @@ class ChatUI {
                 }
                 
                 this.updateChatList();
+                this.renderChatMessages();
             }
         }
         this.scrollToBottom();
