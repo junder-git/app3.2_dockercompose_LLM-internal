@@ -11,6 +11,7 @@ services:
       - OLLAMA_NUM_THREAD=${OLLAMA_NUM_THREAD}
       - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE}
       - MODEL_NAME=${MODEL_NAME}
+      - MODEL_GGUF_PATH=${MODEL_GGUF_PATH}
       - MODEL_TEMPERATURE=${MODEL_TEMPERATURE}
       - MODEL_TOP_P=${MODEL_TOP_P}
       - MODEL_TOP_K=${MODEL_TOP_K}
@@ -38,7 +39,7 @@ services:
     ports:
       - "6379:6379"
     volumes:
-      - ./volumes/redis/redis_data:/data
+      - ./volumes/redis_data:/data
     networks:
       - internal-network
     deploy:
@@ -63,7 +64,7 @@ services:
       - MODEL_NUM_CTX=${MODEL_NUM_CTX}
       - MODEL_NUM_PREDICT=${MODEL_NUM_PREDICT}
     volumes:
-      - ./volumes/nginx/nginx_logs:/var/log/nginx
+      - ./volumes/nginx_logs:/var/log/nginx
     networks:
       - internal-network
     deploy:
