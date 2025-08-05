@@ -1,7 +1,7 @@
 services:
   internal-ollama:
     build: ./ollama
-    container_name: internal-devstral-ollama
+    container_name: internal-ollama
     privileged: true
     environment:
       - OLLAMA_HOST=${OLLAMA_HOST}
@@ -35,7 +35,7 @@ services:
     volumes:
       - ./volumes/ollama/models:/root/.ollama/models
     networks:
-      - devstral-network
+      - internal-devstral-network
     deploy:
       resources:
         limits:
@@ -50,14 +50,14 @@ services:
 
   internal-redis:
     build: ./redis
-    container_name: internal-devstral-redis
+    container_name: internal-redis
     ports:
       - "6379:6379"
     volumes:
       - ./volumes/redis/redis_data:/data
       - ./volumes/redis/redis_logs:/var/log/redis
     networks:
-      - devstral-network
+      - internal-devstral-network
     deploy:
       resources:
         limits:
@@ -70,7 +70,7 @@ services:
 
   internal-nginx:
     build: ./nginx
-    container_name: internal-devstral-nginx
+    container_name: internal-nginx
     ports:
       - "443:443"
     environment:
@@ -98,7 +98,7 @@ services:
       - ./volumes/nginx/nginx_cache:/var/cache/nginx
       - ./volumes/nginx/nginx_logs:/var/log/nginx
     networks:
-      - devstral-network
+      - internal-devstral-network
     deploy:
       resources:
         limits:
@@ -110,5 +110,5 @@ services:
     restart: unless-stopped
 
 networks:
-  devstral-network:
+  internal-devstral-network:
     driver: bridge
