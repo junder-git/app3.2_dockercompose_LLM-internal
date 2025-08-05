@@ -1,0 +1,80 @@
+services:
+  ollama:
+    build: ./ollama
+    container_name: internal-ollama
+    privileged: true
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434
+      - OLLAMA_ORIGINS=*
+      - OLLAMA_MODELS=/root/.ollama/models
+      - OLLAMA_NUM_GPU=${OLLAMA_GPU_LAYERS}
+      - OLLAMA_NUM_THREAD=${OLLAMA_NUM_THREAD}
+      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE}
+      - MODEL_NAME=${MODEL_NAME}
+      - MODEL_TEMPERATURE=${MODEL_TEMPERATURE}
+      - MODEL_TOP_P=${MODEL_TOP_P}
+      - MODEL_TOP_K=${MODEL_TOP_K}
+      - MODEL_NUM_CTX=${MODEL_NUM_CTX}
+      - MODEL_NUM_PREDICT=${MODEL_NUM_PREDICT}
+    ports:
+      - "11434:11434"
+    volumes:
+      - ./volumes/ollama/models:/root/.ollama/models
+    networks:
+      - internal-network
+    deploy:
+      resources:
+        limits:
+          cpus: ${OLLAMA_CPU}
+          memory: ${OLLAMA_MEMORY}
+        reservations:
+          devices:
+            - capabilities: [gpu]
+    restart: unless-stopped
+
+  redis:
+    build: ./redis
+    container_name: internal-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./volumes/redis_data:/data
+    networks:
+      - internal-network
+    deploy:
+      resources:
+        limits:
+          memory: ${REDIS_MEMORY}
+    restart: unless-stopped
+
+  nginx:
+    build: ./nginx
+    container_name: internal-nginx
+    ports:
+      - "443:443"
+    environment:
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
+      - MODEL_URL=${MODEL_URL}
+      - MODEL_NAME=${MODEL_NAME}
+      - MODEL_TEMPERATURE=${MODEL_TEMPERATURE}
+      - MODEL_TOP_P=${MODEL_TOP_P}
+      - MODEL_TOP_K=${MODEL_TOP_K}
+      - MODEL_NUM_CTX=${MODEL_NUM_CTX}
+      - MODEL_NUM_PREDICT=${MODEL_NUM_PREDICT}
+    volumes:
+      - ./volumes/nginx_logs:/var/log/nginx
+    networks:
+      - internal-network
+    deploy:
+      resources:
+        limits:
+          memory: ${NGINX_MEMORY}
+    restart: unless-stopped
+    depends_on:
+      - ollama
+      - redis
+
+networks:
+  internal-network:
+    driver: bridge
