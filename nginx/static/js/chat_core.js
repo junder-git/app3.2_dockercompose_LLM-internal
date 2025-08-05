@@ -181,19 +181,16 @@ class InternalChat {
     
     // Message Handling - delegate to Ollama
     async sendMessage() {
-        var blank = {};
         const input = document.getElementById('chat-input');
         if (!input) return;
-        
         const message = input.value.trim();
         if (!message && this.fileUpload.attachedFiles.length === 0) return;
         if (this.isTyping) return;
         
         // Prepare message - delegate to Ollama for formatting
         const { messageContent, filesToSend } = this.ollama.prepareMessage(message, this.fileUpload.attachedFiles);
-        blank.content = messageContent
         // Add user message to UI
-        this.ui.addMessage('user', blank, false, filesToSend);
+        this.ui.addMessage('user', messageContent, false, filesToSend);
         //this.ui.addMessageFromRedis(messageContent)
         
         // Clear input and files
@@ -218,16 +215,14 @@ class InternalChat {
             }
             
             if (stream.content) {
-                blank.content = stream.content
-                this.ui.addMessage('assistant', blank, false);
+                this.ui.addMessage('assistant', stream.content, false);
                 this.ui.updateCurrentChatTitle(this.ollama.generateTitle(message));
             }
             
         } catch (error) {
             // Delegate error handling to Ollama and UI
             const errorInfo = this.ollama.classifyError(error);
-            blank.content = `Error: ${errorInfo.userFriendly}`
-            this.ui.addMessage('system', blank, true);
+            this.ui.addMessage('system', `Error: ${errorInfo.userFriendly}`, true);
             this.ui.showToast(errorInfo.userFriendly, 'error');
         } finally {
             this.setTypingState(false);
