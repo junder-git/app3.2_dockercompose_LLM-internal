@@ -1,4 +1,4 @@
-// UI functionality and visual elements
+// UI functionality and visual elements - Updated for chat(n) format
 class ChatUI {
     constructor(chatInstance) {
         this.chat = chatInstance;
@@ -6,7 +6,7 @@ class ChatUI {
     }
     
     init() {
-        console.log('Chat UI system initialized');
+        console.log('Chat UI system initialized (chat(n) format)');
     }
     
     setupSidebarResize() {
@@ -116,14 +116,18 @@ class ChatUI {
         
         // Get preview text from last message
         const lastMessage = chat.messages[chat.messages.length - 1];
-        const preview = lastMessage ? 
+        const preview = chat.preview || (lastMessage ? 
             (lastMessage.content.length > 60 ? 
                 lastMessage.content.substring(0, 60) + '...' : 
                 lastMessage.content) : 
-            'No messages yet';
+            'No messages yet');
         
-        const messageCount = chat.messages.length;
+        const messageCount = chat.messageCount || chat.messages.length;
         const formattedDate = this.formatChatDate(chat.updatedAt);
+        
+        // Extract timestamp from chat ID for display
+        const chatTimestamp = this.chat.getChatTimestamp(chat.id);
+        const chatDisplayId = chatTimestamp ? `chat(${chatTimestamp})` : chat.id;
         
         chatItem.innerHTML = `
             <div class="chat-item-header">
@@ -138,6 +142,9 @@ class ChatUI {
             <div class="chat-item-meta">
                 <div class="chat-item-date">${formattedDate}</div>
                 <div class="chat-item-count">${messageCount}</div>
+            </div>
+            <div class="chat-item-id">
+                <small class="text-muted">${chatDisplayId}</small>
             </div>
         `;
         

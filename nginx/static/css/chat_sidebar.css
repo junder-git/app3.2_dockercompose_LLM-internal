@@ -1,4 +1,4 @@
-/* Sidebar */
+/* Sidebar - Updated for chat(n) format display */
 .sidebar {
     width: var(--sidebar-width);
     background: var(--bg-secondary);
@@ -139,6 +139,7 @@
     align-items: center;
     font-size: 0.75rem;
     color: var(--text-secondary);
+    margin-bottom: 0.25rem;
 }
 
 .chat-item.active .chat-item-meta {
@@ -160,6 +161,34 @@
 .chat-item.active .chat-item-count {
     background: rgba(255, 255, 255, 0.2);
     color: white;
+}
+
+/* New: Chat ID display */
+.chat-item-id {
+    text-align: center;
+    margin-top: 0.25rem;
+    padding-top: 0.25rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.chat-item-id small {
+    font-family: monospace;
+    font-size: 0.65rem;
+    color: var(--text-secondary);
+    opacity: 0.7;
+}
+
+.chat-item.active .chat-item-id small {
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.chat-item:hover .chat-item-id small {
+    opacity: 1;
+    color: var(--primary-color);
+}
+
+.chat-item.active:hover .chat-item-id small {
+    color: rgba(255, 255, 255, 0.9);
 }
 
 /* Sidebar overlay for mobile */
@@ -194,5 +223,9 @@
     
     .chat-item-menu {
         opacity: 1;
+    }
+    
+    .chat-item-id small {
+        font-size: 0.6rem;
     }
 }

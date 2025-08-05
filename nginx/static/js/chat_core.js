@@ -1,4 +1,4 @@
-// Core chat functionality - Redis Backend
+// Core chat functionality - Redis Backend with chat(n) format
 class InternalChat {
     constructor() {
         this.isTyping = false;
@@ -20,9 +20,24 @@ class InternalChat {
         this.setupEventListeners();
         this.setupMarkdown();
         this.setupSidebar();
-        this.loadChatList();
-        this.createNewChat(); // Start with a new chat
-        console.log('Multi-chat internal chat initialized (Redis backend)');
+        this.loadChatList().then(() => {
+            // Only create new chat if no chats exist
+            if (this.chats.size === 0) {
+                this.createNewChat();
+            } else {
+                // Switch to the most recent chat
+                const chatIds = Array.from(this.chats.keys());
+                const sortedChats = Array.from(this.chats.values())
+                    .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+                
+                if (sortedChats.length > 0) {
+                    this.switchToChat(sortedChats[0].id);
+                } else {
+                    this.createNewChat();
+                }
+            }
+        });
+        console.log('Multi-chat internal chat initialized (Redis backend, chat(n) format)');
     }
     
     setupMarkdown() {
@@ -93,7 +108,9 @@ class InternalChat {
     
     // Chat Management Methods
     generateChatId() {
-        return 'chat_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        // Generate chat(n) format where n is the current timestamp
+        const timestamp = Date.now();
+        return `chat(${timestamp})`;
     }
     
     createNewChat() {
@@ -108,8 +125,9 @@ class InternalChat {
         
         this.chats.set(chatId, chat);
         this.switchToChat(chatId);
-        this.loadChatList(); // Reload from Redis to get updated list
+        this.ui.updateChatList();
         
+        console.log('Created new chat with ID:', chatId);
         return chatId;
     }
     
@@ -119,6 +137,13 @@ class InternalChat {
             return;
         }
         
+        // Validate chat ID format
+        if (!this.isValidChatId(chatId)) {
+            console.error('Invalid chat ID format:', chatId, 'Expected: chat(n)');
+            return;
+        }
+        
+        console.log('Switching to chat:', chatId);
         this.currentChatId = chatId;
         
         // Set artifact system chat ID
@@ -132,7 +157,17 @@ class InternalChat {
         this.fileUpload.clearAllFiles();
     }
     
-    // Updated loadChatMessages method in InternalChat class
+    // Validate chat ID format: chat(n)
+    isValidChatId(chatId) {
+        return /^chat\(\d+\)$/.test(chatId);
+    }
+    
+    // Extract timestamp from chat ID
+    getChatTimestamp(chatId) {
+        const match = chatId.match(/^chat\((\d+)\)$/);
+        return match ? parseInt(match[1]) : null;
+    }
+    
     async loadChatMessages(chatId) {
         const messagesContainer = document.getElementById('messages-content');
         const welcomePrompt = document.getElementById('welcome-prompt');
@@ -143,7 +178,7 @@ class InternalChat {
         messagesContainer.innerHTML = '';
         
         try {
-            const response = await fetch(`/api/chat/history?chat_id=${chatId}`);
+            const response = await fetch(`/api/chat/history?chat_id=${encodeURIComponent(chatId)}`);
             if (!response.ok) {
                 throw new Error('Failed to load chat history');
             }
@@ -213,7 +248,7 @@ class InternalChat {
     }
     
     async deleteChat(chatId) {
-        if (!chatId) return;
+        if (!chatId || !this.isValidChatId(chatId)) return;
         
         try {
             const response = await fetch('/api/chat/delete', {
@@ -310,11 +345,17 @@ class InternalChat {
                 // Update local cache
                 this.chats.clear();
                 chats.forEach(chatInfo => {
+                    // Ensure chat ID is in correct format
+                    if (!this.isValidChatId(chatInfo.id)) {
+                        console.warn('Invalid chat ID format from server:', chatInfo.id);
+                        return;
+                    }
+                    
                     const chat = {
                         id: chatInfo.id,
                         title: this.generateTitleFromPreview(chatInfo.preview),
                         messages: [], // Will be loaded when needed
-                        createdAt: new Date(),
+                        createdAt: new Date(this.getChatTimestamp(chatInfo.id)),
                         updatedAt: new Date(chatInfo.last_updated * 1000),
                         messageCount: chatInfo.message_count,
                         preview: chatInfo.preview
@@ -442,10 +483,13 @@ class InternalChat {
         if (!message && this.fileUpload.attachedFiles.length === 0) return;
         if (this.isTyping) return;
         
-        // Ensure we have a current chat
-        if (!this.currentChatId) {
+        // Ensure we have a current chat with valid ID
+        if (!this.currentChatId || !this.isValidChatId(this.currentChatId)) {
+            console.log('No valid current chat, creating new one');
             this.createNewChat();
         }
+        
+        console.log('Sending message to chat:', this.currentChatId);
         
         let messageContent = message;
         const filesToSend = [...this.fileUpload.attachedFiles];
@@ -488,11 +532,18 @@ class InternalChat {
     }
     
     async streamResponse(message, aiMessage, files = []) {
+        // Make sure we have a valid chat ID
+        if (!this.currentChatId || !this.isValidChatId(this.currentChatId)) {
+            throw new Error('No valid current chat ID available');
+        }
+        
         const requestBody = {
             message: message,
             files: [],
-            chatId: this.currentChatId
+            chatId: this.currentChatId  // This will be in chat(n) format
         };
+        
+        console.log('Streaming request body:', requestBody);
         
         if (files && files.length > 0) {
             for (const file of files) {
@@ -526,7 +577,9 @@ class InternalChat {
         });
         
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            const errorText = await response.text();
+            console.error('Stream response error:', response.status, errorText);
+            throw new Error(`HTTP ${response.status}: ${response.statusText} - ${errorText}`);
         }
         
         const reader = response.body.getReader();
@@ -556,8 +609,13 @@ class InternalChat {
                             accumulated += parsed.content;
                             this.updateStreamingContent(aiMessage, accumulated);
                         }
+                        if (parsed.error) {
+                            throw new Error(parsed.error);
+                        }
                     } catch (e) {
-                        // Ignore malformed JSON
+                        if (e.message !== 'Unexpected end of JSON input') {
+                            console.error('JSON parse error:', e, 'Data:', data);
+                        }
                     }
                 }
             }
@@ -608,6 +666,12 @@ class InternalChat {
                 errorMessage = 'Response generation was stopped.';
             } else if (error.message.includes('fetch')) {
                 errorMessage = 'Connection error. Please check if the AI service is running.';
+            } else if (error.message.includes('Missing chat_id')) {
+                errorMessage = 'Chat session error. Please try creating a new chat.';
+            } else if (error.message.includes('valid current chat ID')) {
+                errorMessage = 'Invalid chat session. Creating a new chat...';
+                // Auto-create new chat on invalid ID
+                setTimeout(() => this.createNewChat(), 2000);
             }
             
             contentDiv.innerHTML = `<div class="text-danger"><i class="bi bi-exclamation-triangle"></i> ${errorMessage}</div>`;
