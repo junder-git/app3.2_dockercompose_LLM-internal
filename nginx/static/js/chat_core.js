@@ -1,7 +1,7 @@
-// Chat Core Module - Main orchestrator that coordinates Redis, Ollama, UI, and Artifacts
+// Chat Core Module - Thin orchestrator that delegates to specialized modules
 class InternalChat {
     constructor() {
-        // State
+        // State - minimal, just coordination
         this.currentChatId = null;
         this.chats = new Map();
         this.isTyping = false;
@@ -25,53 +25,10 @@ class InternalChat {
         
         this.setupEventListeners();
         this.setupMarkdown();
-        this.setupSidebar();
         this.setupOllamaCallbacks();
         
-        // Initialize chat system
-        try {
-            await this.initializeChatSystem();
-            console.log('Multi-chat system initialized successfully');
-        } catch (error) {
-            console.error('Failed to initialize chat system:', error);
-            await this.createNewChat(); // Fallback
-        }
-    }
-    
-    async initializeChatSystem() {
-        const result = await this.redis.getChatList();
-        
-        if (result.success && result.chats.length > 0) {
-            // Load existing chats
-            this.chats.clear();
-            result.chats.forEach(chatInfo => {
-                if (this.redis.isValidChatId(chatInfo.id)) {
-                    const chat = {
-                        id: chatInfo.id,
-                        title: this.redis.generateTitleFromPreview(chatInfo.preview),
-                        messages: [], // Loaded on demand
-                        createdAt: new Date(this.redis.extractChatTimestamp(chatInfo.id)),
-                        updatedAt: new Date(chatInfo.last_updated * 1000),
-                        messageCount: chatInfo.message_count,
-                        preview: chatInfo.preview
-                    };
-                    this.chats.set(chatInfo.id, chat);
-                }
-            });
-            
-            // Switch to most recent chat
-            const sortedChats = Array.from(this.chats.values())
-                .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
-            
-            if (sortedChats.length > 0) {
-                await this.switchToChat(sortedChats[0].id);
-            }
-            
-            this.ui.updateChatList();
-        } else {
-            // Create first chat
-            await this.createNewChat();
-        }
+        // Initialize chat system - delegate to Redis
+        await this.redis.initializeChatSystem(this);
     }
     
     setupEventListeners() {
@@ -105,7 +62,7 @@ class InternalChat {
         // Stop button
         const stopButton = document.getElementById('stop-button');
         if (stopButton) {
-            stopButton.addEventListener('click', () => this.stopGeneration());
+            stopButton.addEventListener('click', () => this.ollama.stopStream());
         }
         
         // Sidebar toggle
@@ -117,7 +74,7 @@ class InternalChat {
         // Chat search
         const chatSearch = document.getElementById('chat-search');
         if (chatSearch) {
-            chatSearch.addEventListener('input', (e) => this.searchChats(e.target.value));
+            chatSearch.addEventListener('input', (e) => this.ui.searchChats(e.target.value, this.chats));
         }
         
         // Initialize chat options modal
@@ -135,210 +92,86 @@ class InternalChat {
         }
     }
     
-    setupSidebar() {
-        this.ui.setupSidebarResize();
-    }
-    
     setupOllamaCallbacks() {
-        // Set up streaming callback for real-time UI updates
+        // Set up streaming callback - delegate to UI for updates
         this.ollama.setChunkCallback((data) => {
+            // Update chat ID if provided
             if (data.chatId && data.chatId !== this.currentChatId) {
-                // Update current chat ID if server provided a new one
-                this.currentChatId = data.chatId;
-                this.artifacts.setChatId(data.chatId);
-                
-                // Add to local cache if new
-                if (!this.chats.has(data.chatId)) {
-                    const chat = {
-                        id: data.chatId,
-                        title: 'New Chat',
-                        messages: [],
-                        createdAt: new Date(),
-                        updatedAt: new Date(),
-                        messageCount: 0,
-                        preview: ''
-                    };
-                    this.chats.set(data.chatId, chat);
-                }
+                this.setCurrentChatId(data.chatId);
             }
             
-            // Update streaming content in real-time
-            this.updateStreamingContent(data.content);
+            // Delegate to UI for streaming updates
+            this.ui.updateStreamingContent(data.content);
         });
     }
     
-    // Chat Management
+    // Simple state management
+    setCurrentChatId(chatId) {
+        this.currentChatId = chatId;
+        this.artifacts.setChatId(chatId);
+    }
+    
+    setTypingState(isTyping) {
+        this.isTyping = isTyping;
+        this.ui.updateButtons(isTyping);
+    }
+    
+    // Chat Management - delegate to Redis
     async createNewChat() {
-        try {
-            const result = await this.redis.createNewChat();
-            
-            if (result.success) {
-                const chat = {
-                    id: result.chat_id,
-                    title: 'New Chat',
-                    messages: [],
-                    createdAt: new Date(result.created_at * 1000),
-                    updatedAt: new Date(result.created_at * 1000),
-                    messageCount: 0,
-                    preview: ''
-                };
-                
-                this.chats.set(result.chat_id, chat);
-                await this.switchToChat(result.chat_id);
-                this.ui.updateChatList();
-                
-                console.log('Created new chat:', result.chat_id);
-                return result.chat_id;
-            } else {
-                throw new Error(result.error);
-            }
-        } catch (error) {
-            console.error('Failed to create new chat:', error);
+        const result = await this.redis.createNewChat();
+        if (result.success) {
+            this.redis.addChatToLocalCache(result, this.chats);
+            await this.switchToChat(result.chat_id);
+            this.ui.updateChatList(this.chats);
+            return result.chat_id;
+        } else {
             this.ui.showToast('Failed to create new chat', 'error');
             return null;
         }
     }
     
     async switchToChat(chatId) {
-        if (!chatId || !this.redis.isValidChatId(chatId)) {
-            console.error('Invalid chat ID:', chatId);
-            return;
+        // Validate and switch - delegate to Redis
+        if (await this.redis.switchToChat(chatId, this)) {
+            this.ui.updateChatListActiveState(this.currentChatId);
+            this.fileUpload.clearAllFiles();
         }
-        
-        console.log('Switching to chat:', chatId);
-        this.currentChatId = chatId;
-        this.artifacts.setChatId(chatId);
-        
-        await this.loadChatMessages(chatId);
-        this.ui.updateChatListActiveState();
-        this.fileUpload.clearAllFiles();
     }
     
     async loadChatMessages(chatId) {
-        const messagesContainer = document.getElementById('messages-content');
-        const welcomePrompt = document.getElementById('welcome-prompt');
-        
-        if (!messagesContainer) return;
-        
-        // Clear current messages
-        messagesContainer.innerHTML = '';
-        
+        // Delegate to Redis for loading, UI for rendering
         const result = await this.redis.getChatHistory(chatId);
-        
-        if (result.success) {
-            const messages = result.messages;
-            console.log(`Loaded ${messages.length} messages for chat ${chatId}`);
-            
-            if (messages.length === 0) {
-                // Show welcome prompt for empty chats
-                if (welcomePrompt) {
-                    welcomePrompt.style.display = 'block';
-                }
-                this.ui.updateCurrentChatTitle('New Chat');
-            } else {
-                // Hide welcome prompt and load messages
-                if (welcomePrompt) {
-                    welcomePrompt.style.display = 'none';
-                }
-                
-                // Update chat title from first user message
-                const firstUserMessage = messages.find(msg => msg.role === 'user');
-                if (firstUserMessage) {
-                    const title = firstUserMessage.content.length > 30 ? 
-                        firstUserMessage.content.substring(0, 30) + '...' : 
-                        firstUserMessage.content;
-                    this.ui.updateCurrentChatTitle(title);
-                }
-                
-                // Load messages and process with artifacts
-                for (const msg of messages) {
-                    const messageElement = this.addMessageFromRedis(msg);
-                    
-                    if (messageElement && msg.id) {
-                        // Determine artifact type from message ID format
-                        let messageType;
-                        if (msg.id.startsWith('admin(')) {
-                            messageType = 'admin';
-                        } else if (msg.id.startsWith('jai(')) {
-                            messageType = 'jai';
-                        } else {
-                            messageType = msg.role === 'user' ? 'admin' : 'jai';
-                        }
-                        
-                        this.artifacts.processMessageElement(
-                            messageElement, 
-                            messageType, 
-                            msg.content, 
-                            msg.files || [], 
-                            msg.id
-                        );
-                    }
-                }
-                
-                this.ui.scrollToBottom();
-            }
-        } else {
-            console.error('Failed to load chat messages:', result.error);
-            if (welcomePrompt) {
-                welcomePrompt.style.display = 'block';
-            }
-            this.ui.updateCurrentChatTitle('Error Loading Chat');
-        }
+        this.ui.renderChatMessages(result, this.artifacts);
     }
     
     async deleteChat(chatId) {
-        if (!chatId || !this.redis.isValidChatId(chatId)) return;
-        
         const result = await this.redis.deleteChat(chatId);
-        
         if (result.success) {
-            this.chats.delete(chatId);
-            
-            // If deleting current chat, switch to another or create new
-            if (this.currentChatId === chatId) {
-                await this.refreshChatList();
-                const remainingChats = Array.from(this.chats.keys());
-                if (remainingChats.length > 0) {
-                    await this.switchToChat(remainingChats[0]);
-                } else {
-                    await this.createNewChat();
-                }
-            } else {
-                await this.refreshChatList();
-            }
-            
-            console.log(`Deleted chat ${chatId}, removed ${result.deleted_count} items`);
+            await this.redis.handleChatDeletion(chatId, this);
+            this.ui.updateChatList(this.chats);
         } else {
-            console.error('Failed to delete chat:', result.error);
             this.ui.showToast('Failed to delete chat', 'error');
         }
     }
     
     async refreshChatList() {
-        const result = await this.redis.getChatList();
-        
-        if (result.success) {
-            this.chats.clear();
-            result.chats.forEach(chatInfo => {
-                if (this.redis.isValidChatId(chatInfo.id)) {
-                    const chat = {
-                        id: chatInfo.id,
-                        title: this.redis.generateTitleFromPreview(chatInfo.preview),
-                        messages: [],
-                        createdAt: new Date(this.redis.extractChatTimestamp(chatInfo.id)),
-                        updatedAt: new Date(chatInfo.last_updated * 1000),
-                        messageCount: chatInfo.message_count,
-                        preview: chatInfo.preview
-                    };
-                    this.chats.set(chatInfo.id, chat);
-                }
-            });
-            
-            this.ui.updateChatList();
-        }
+        await this.redis.refreshChatList(this);
+        this.ui.updateChatList(this.chats);
     }
     
-    // Message Handling
+    async clearCurrentChatArtifacts() {
+        if (!this.currentChatId) return false;
+        
+        const result = await this.redis.clearChat(this.currentChatId);
+        if (result.success) {
+            this.ui.clearMessagesUI();
+            await this.refreshChatList();
+            this.ui.updateCurrentChatTitle('New Chat');
+        }
+        return result.success;
+    }
+    
+    // Message Handling - delegate to Ollama
     async sendMessage() {
         const input = document.getElementById('chat-input');
         if (!input) return;
@@ -347,22 +180,88 @@ class InternalChat {
         if (!message && this.fileUpload.attachedFiles.length === 0) return;
         if (this.isTyping) return;
         
-        console.log('Sending message to chat:', this.currentChatId);
-        
-        // Prepare message content
-        const filesToSend = [...this.fileUpload.attachedFiles];
-        let messageContent = message;
-        
-        if (filesToSend.length > 0) {
-            const fileInfo = this.ollama.formatFileInfo(filesToSend);
-            messageContent = messageContent ? `${messageContent}\n\n${fileInfo}` : fileInfo;
-        }
+        // Prepare message - delegate to Ollama for formatting
+        const { messageContent, filesToSend } = this.ollama.prepareMessage(message, this.fileUpload.attachedFiles);
         
         // Add user message to UI
-        this.addMessage('user', messageContent, false, filesToSend);
+        this.ui.addMessage('user', messageContent, false, filesToSend);
         
         // Clear input and files
         input.value = '';
         this.fileUpload.clearAllFiles();
         this.ui.updateCharCount();
-        this.ui.autoResize
+        this.ui.autoResizeTextarea();
+        this.ui.hideWelcomePrompt();
+        
+        // Set typing state
+        this.setTypingState(true);
+        
+        try {
+            // Send to Ollama - it handles streaming and callbacks
+            const stream = await this.ollama.streamMessage(message, filesToSend, this.currentChatId);
+            
+            // Handle response - delegate to UI
+            if (stream.chatId && stream.chatId !== this.currentChatId) {
+                this.setCurrentChatId(stream.chatId);
+                this.redis.addNewChatToCache(stream.chatId, message, this.chats);
+                this.ui.updateChatList(this.chats);
+            }
+            
+            if (stream.content) {
+                this.ui.addMessage('assistant', stream.content, false);
+                this.ui.updateCurrentChatTitle(this.ollama.generateTitle(message));
+            }
+            
+        } catch (error) {
+            // Delegate error handling to Ollama and UI
+            const errorInfo = this.ollama.classifyError(error);
+            this.ui.addMessage('system', `Error: ${errorInfo.userFriendly}`, true);
+            this.ui.showToast(errorInfo.userFriendly, 'error');
+        } finally {
+            this.setTypingState(false);
+        }
+    }
+    
+    // Chat Options - minimal coordination
+    showChatOptions(chatId) {
+        this.selectedChatForOptions = chatId;
+        this.ui.showChatOptionsModal(chatId, this.chats.get(chatId), this.chatOptionsModal);
+    }
+    
+    async renameChat(chatId, newTitle) {
+        this.redis.renameChatInCache(chatId, newTitle, this.chats);
+        this.ui.updateChatList(this.chats);
+        if (chatId === this.currentChatId) {
+            this.ui.updateCurrentChatTitle(newTitle);
+        }
+    }
+    
+    async duplicateChat(chatId) {
+        // Delegate to Redis for implementation
+        return await this.redis.duplicateChat(chatId);
+    }
+    
+    // Artifact integration - simple delegation
+    async getArtifactReference(artifactId) {
+        return await this.artifacts.getArtifact(artifactId);
+    }
+    
+    async searchArtifacts(query, type = null) {
+        return await this.artifacts.searchArtifacts(query, type);
+    }
+    
+    async exportChatArtifacts() {
+        try {
+            const exportData = await this.artifacts.exportArtifacts();
+            this.ui.downloadFile(exportData, `chat-${this.currentChatId}-artifacts.json`, 'application/json');
+            this.ui.showToast('Artifacts exported successfully', 'success');
+        } catch (error) {
+            this.ui.showToast('Failed to export artifacts', 'error');
+        }
+    }
+    
+    // Utility - simple delegation
+    getChatTimestamp(chatId) {
+        return this.redis.extractChatTimestamp(chatId);
+    }
+}

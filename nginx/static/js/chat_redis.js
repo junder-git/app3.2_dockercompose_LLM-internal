@@ -4,6 +4,134 @@ class ChatRedis {
         this.baseUrl = '';
         console.log('Chat Redis module initialized');
     }
+    // Initialize the entire chat system
+    async initializeChatSystem(core) {
+        const result = await this.getChatList();
+        
+        if (result.success && result.chats.length > 0) {
+            // Load existing chats into core's cache
+            core.chats.clear();
+            result.chats.forEach(chatInfo => {
+                if (this.isValidChatId(chatInfo.id)) {
+                    const chat = {
+                        id: chatInfo.id,
+                        title: this.generateTitleFromPreview(chatInfo.preview),
+                        messages: [],
+                        createdAt: new Date(this.extractChatTimestamp(chatInfo.id)),
+                        updatedAt: new Date(chatInfo.last_updated * 1000),
+                        messageCount: chatInfo.message_count,
+                        preview: chatInfo.preview
+                    };
+                    core.chats.set(chatInfo.id, chat);
+                }
+            });
+            
+            // Switch to most recent chat
+            const sortedChats = Array.from(core.chats.values())
+                .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+            
+            if (sortedChats.length > 0) {
+                await core.switchToChat(sortedChats[0].id);
+            }
+            
+            core.ui.updateChatList(core.chats);
+        } else {
+            // Create first chat
+            await core.createNewChat();
+        }
+    }
+
+    // Add newly created chat to local cache
+    addChatToLocalCache(result, chatsMap) {
+        const chat = {
+            id: result.chat_id,
+            title: 'New Chat',
+            messages: [],
+            createdAt: new Date(result.created_at * 1000),
+            updatedAt: new Date(result.created_at * 1000),
+            messageCount: 0,
+            preview: ''
+        };
+        chatsMap.set(result.chat_id, chat);
+    }
+
+    // Add new chat from streaming response
+    addNewChatToCache(chatId, message, chatsMap) {
+        if (!chatsMap.has(chatId)) {
+            const chat = {
+                id: chatId,
+                title: message.length > 30 ? message.substring(0, 30) + '...' : message,
+                messages: [],
+                createdAt: new Date(),
+                updatedAt: new Date(),
+                messageCount: 0,
+                preview: message
+            };
+            chatsMap.set(chatId, chat);
+        }
+    }
+
+    // Validate and switch to chat
+    async switchToChat(chatId, core) {
+        if (!chatId || !this.isValidChatId(chatId)) {
+            console.error('Invalid chat ID:', chatId);
+            return false;
+        }
+        
+        console.log('Switching to chat:', chatId);
+        core.setCurrentChatId(chatId);
+        await core.loadChatMessages(chatId);
+        return true;
+    }
+
+    // Handle chat deletion logic
+    async handleChatDeletion(chatId, core) {
+        core.chats.delete(chatId);
+        
+        // If deleting current chat, switch to another or create new
+        if (core.currentChatId === chatId) {
+            await this.refreshChatList(core);
+            const remainingChats = Array.from(core.chats.keys());
+            if (remainingChats.length > 0) {
+                await core.switchToChat(remainingChats[0]);
+            } else {
+                await core.createNewChat();
+            }
+        }
+        
+        console.log(`Deleted chat ${chatId}`);
+    }
+
+    // Refresh chat list from Redis
+    async refreshChatList(core) {
+        const result = await this.getChatList();
+        
+        if (result.success) {
+            core.chats.clear();
+            result.chats.forEach(chatInfo => {
+                if (this.isValidChatId(chatInfo.id)) {
+                    const chat = {
+                        id: chatInfo.id,
+                        title: this.generateTitleFromPreview(chatInfo.preview),
+                        messages: [],
+                        createdAt: new Date(this.extractChatTimestamp(chatInfo.id)),
+                        updatedAt: new Date(chatInfo.last_updated * 1000),
+                        messageCount: chatInfo.message_count,
+                        preview: chatInfo.preview
+                    };
+                    core.chats.set(chatInfo.id, chat);
+                }
+            });
+        }
+    }
+
+    // Rename chat in cache
+    renameChatInCache(chatId, newTitle, chatsMap) {
+        const chat = chatsMap.get(chatId);
+        if (chat) {
+            chat.title = newTitle;
+        }
+    }
     
     // Chat Management
     async createNewChat() {

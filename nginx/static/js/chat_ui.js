@@ -348,4 +348,218 @@ class ChatUI {
             toastElement.remove();
         });
     }
+    // Render chat messages from Redis result
+    renderChatMessages(result, artifacts) {
+        const messagesContainer = document.getElementById('messages-content');
+        const welcomePrompt = document.getElementById('welcome-prompt');
+        
+        if (!messagesContainer) return;
+        
+        // Clear current messages
+        messagesContainer.innerHTML = '';
+        
+        if (result.success) {
+            const messages = result.messages;
+            console.log(`Loaded ${messages.length} messages for chat`);
+            
+            if (messages.length === 0) {
+                // Show welcome prompt for empty chats
+                if (welcomePrompt) {
+                    welcomePrompt.style.display = 'block';
+                }
+                this.updateCurrentChatTitle('New Chat');
+            } else {
+                // Hide welcome prompt and load messages
+                if (welcomePrompt) {
+                    welcomePrompt.style.display = 'none';
+                }
+                
+                // Update chat title from first user message
+                const firstUserMessage = messages.find(msg => msg.role === 'user');
+                if (firstUserMessage) {
+                    const title = firstUserMessage.content.length > 30 ? 
+                        firstUserMessage.content.substring(0, 30) + '...' : 
+                        firstUserMessage.content;
+                    this.updateCurrentChatTitle(title);
+                }
+                
+                // Load messages and process with artifacts
+                for (const msg of messages) {
+                    const messageElement = this.addMessageFromRedis(msg);
+                    
+                    if (messageElement && msg.id) {
+                        // Determine artifact type from message ID format
+                        let messageType;
+                        if (msg.id.startsWith('admin(')) {
+                            messageType = 'admin';
+                        } else if (msg.id.startsWith('jai(')) {
+                            messageType = 'jai';
+                        } else {
+                            messageType = msg.role === 'user' ? 'admin' : 'jai';
+                        }
+                        
+                        artifacts.processMessageElement(
+                            messageElement, 
+                            messageType, 
+                            msg.content, 
+                            msg.files || [], 
+                            msg.id
+                        );
+                    }
+                }
+                
+                this.scrollToBottom();
+            }
+        } else {
+            console.error('Failed to load chat messages:', result.error);
+            if (welcomePrompt) {
+                welcomePrompt.style.display = 'block';
+            }
+            this.updateCurrentChatTitle('Error Loading Chat');
+        }
+    }
+
+    // Search chats with provided chats map
+    searchChats(query, chatsMap) {
+        const chatItems = document.querySelectorAll('.chat-item');
+        const lowerQuery = query.toLowerCase();
+        
+        chatItems.forEach(item => {
+            const title = item.querySelector('.chat-item-title').textContent.toLowerCase();
+            const preview = item.querySelector('.chat-item-preview').textContent.toLowerCase();
+            
+            if (title.includes(lowerQuery) || preview.includes(lowerQuery)) {
+                item.style.display = 'block';
+            } else {
+                item.style.display = 'none';
+            }
+        });
+    }
+
+    // Clear messages UI
+    clearMessagesUI() {
+        const messagesContainer = document.getElementById('messages-content');
+        const welcomePrompt = document.getElementById('welcome-prompt');
+        
+        if (messagesContainer) {
+            messagesContainer.innerHTML = '';
+        }
+        if (welcomePrompt) {
+            welcomePrompt.style.display = 'block';
+        }
+    }
+
+    // Hide welcome prompt
+    hideWelcomePrompt() {
+        const welcomePrompt = document.getElementById('welcome-prompt');
+        if (welcomePrompt) {
+            welcomePrompt.style.display = 'none';
+        }
+    }
+
+    // Show chat options modal
+    showChatOptionsModal(chatId, chat, modal) {
+        if (chat) {
+            const renameInput = document.getElementById('rename-chat-input');
+            if (renameInput) {
+                renameInput.value = chat.title;
+            }
+            modal.show();
+        }
+    }
+
+    // Download file utility
+    downloadFile(content, filename, mimeType) {
+        const blob = new Blob([content], { type: mimeType });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    // Update streaming content
+    updateStreamingContent(content) {
+        const messagesContainer = document.getElementById('messages-content');
+        if (!messagesContainer) return;
+        
+        let streamingMessage = messagesContainer.querySelector('.message.streaming');
+        
+        if (!streamingMessage && content) {
+            // Create new streaming message
+            streamingMessage = this.addMessage('assistant', '', true);
+            streamingMessage.classList.add('streaming');
+        }
+        
+        if (streamingMessage && content) {
+            const contentDiv = streamingMessage.querySelector('.message-content');
+            if (contentDiv) {
+                // Update content with markdown rendering
+                if (window.marked) {
+                    contentDiv.innerHTML = marked.parse(content);
+                } else {
+                    contentDiv.textContent = content;
+                }
+                
+                // Enhance code blocks
+                this.enhanceCodeBlocks(contentDiv, content);
+                
+                // Scroll to keep content visible
+                this.scrollToBottom();
+            }
+        }
+    }
+
+    // Add message from Redis data
+    addMessageFromRedis(msg) {
+        const messagesContainer = document.getElementById('messages-content');
+        if (!messagesContainer) return null;
+        
+        const messageElement = document.createElement('div');
+        messageElement.className = `message message-${msg.role}`;
+        
+        const timestamp = new Date(msg.timestamp * 1000).toLocaleTimeString();
+        const roleLabel = msg.role === 'user' ? 'You' : msg.role === 'assistant' ? 'JAI' : 'System';
+        
+        messageElement.innerHTML = `
+            <div class="message-header">
+                <div class="message-role">${roleLabel}</div>
+                <div class="message-time">${timestamp}</div>
+            </div>
+            <div class="message-content"></div>
+        `;
+        
+        const contentDiv = messageElement.querySelector('.message-content');
+        
+        // Render content
+        if (window.marked && msg.role === 'assistant') {
+            contentDiv.innerHTML = marked.parse(msg.content);
+        } else {
+            contentDiv.textContent = msg.content;
+        }
+        
+        // Add file attachments if present
+        if (msg.files && msg.files.length > 0) {
+            const filesDiv = document.createElement('div');
+            filesDiv.className = 'message-files';
+            msg.files.forEach(file => {
+                const fileSpan = document.createElement('span');
+                fileSpan.className = 'file-attachment';
+                fileSpan.innerHTML = `<i class="bi bi-paperclip"></i> ${file.name}`;
+                filesDiv.appendChild(fileSpan);
+            });
+            messageElement.appendChild(filesDiv);
+        }
+        
+        // Enhance code blocks for assistant messages
+        if (msg.role === 'assistant') {
+            this.enhanceCodeBlocks(contentDiv, msg.content);
+        }
+        
+        messagesContainer.appendChild(messageElement);
+        return messageElement;
+    }
 }

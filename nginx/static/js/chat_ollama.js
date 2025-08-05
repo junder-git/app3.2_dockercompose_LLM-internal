@@ -251,6 +251,36 @@ class ChatOllama {
         const i = Math.floor(Math.log(bytes) / Math.log(k));
         return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
     }
+
+    // Prepare message content and files for sending
+    prepareMessage(message, attachedFiles) {
+        const filesToSend = [...attachedFiles];
+        let messageContent = message;
+        
+        if (filesToSend.length > 0) {
+            const fileInfo = this.formatFileInfo(filesToSend);
+            messageContent = messageContent ? `${messageContent}\n\n${fileInfo}` : fileInfo;
+        }
+        
+        return { messageContent, filesToSend };
+    }
+
+    // Generate title from message
+    generateTitle(message) {
+        return message.length > 30 ? message.substring(0, 30) + '...' : message;
+    }
+
+    // Stop current streaming (enhanced)
+    stopStream() {
+        if (this.abortController && this.isStreaming) {
+            console.log('Ollama: Stopping stream');
+            this.abortController.abort();
+            this.isStreaming = false;
+            this.abortController = null;
+            return true;
+        }
+        return false;
+    }
     
     // Error classification
     classifyError(error) {
