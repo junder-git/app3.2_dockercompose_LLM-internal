@@ -7,6 +7,9 @@
     --text-primary: #e0e0e0;
     --text-secondary: #b0b0b0;
     --border-color: #333;
+    --success-color: #28a745;
+    --warning-color: #ffc107;
+    --danger-color: #dc3545;
 }
 
 body {
@@ -117,6 +120,28 @@ body {
     background: transparent;
 }
 
+/* File attachments in messages */
+.message-files {
+    margin-bottom: 12px;
+}
+
+.message-file-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 6px 10px;
+    margin: 2px 4px 2px 0;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.message-file-item i {
+    font-size: 14px;
+}
+
 /* Code blocks */
 .message-content pre {
     background: #2d2d2d;
@@ -125,6 +150,7 @@ body {
     overflow-x: auto;
     margin: 1rem 0;
     border: 1px solid var(--border-color);
+    position: relative;
 }
 
 .message-content code {
@@ -139,6 +165,39 @@ body {
     background: transparent;
     padding: 0;
     color: #cccccc;
+}
+
+/* Code block copy button styles */
+.code-copy-btn {
+    position: absolute !important;
+    top: 8px !important;
+    right: 8px !important;
+    z-index: 10 !important;
+    padding: 4px 8px !important;
+    font-size: 12px !important;
+    opacity: 0.7 !important;
+    transition: opacity 0.2s ease !important;
+    background: var(--bg-tertiary) !important;
+    border: 1px solid var(--border-color) !important;
+    color: var(--text-secondary) !important;
+    border-radius: 4px !important;
+}
+
+.code-copy-btn:hover {
+    opacity: 1 !important;
+    background: var(--bg-primary) !important;
+    color: var(--text-primary) !important;
+    border-color: var(--primary-color) !important;
+}
+
+.code-copy-btn.text-success {
+    color: var(--success-color) !important;
+    border-color: var(--success-color) !important;
+}
+
+/* Hover effect for code blocks to show copy button */
+.message-content pre:hover .code-copy-btn {
+    opacity: 1 !important;
 }
 
 /* Streaming cursor */
@@ -160,10 +219,124 @@ body {
     padding: 1rem;
 }
 
-.chat-input-form {
+/* File upload area */
+.file-upload-area {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    margin-bottom: 12px;
+    padding: 12px;
+    animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.file-upload-header {
     display: flex;
-    gap: 12px;
+    justify-content: between;
+    align-items: center;
+    margin-bottom: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.file-upload-header span {
+    flex: 1;
+}
+
+.file-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.file-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 13px;
+    transition: all 0.2s ease;
+}
+
+.file-item:hover {
+    border-color: var(--primary-color);
+}
+
+.file-item-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+}
+
+.file-item-name {
+    color: var(--text-primary);
+    font-weight: 500;
+    word-break: break-all;
+}
+
+.file-item-size {
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+
+.file-item-remove {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 2px;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+}
+
+.file-item-remove:hover {
+    color: var(--danger-color);
+    background: rgba(220, 53, 69, 0.1);
+}
+
+/* Input group container */
+.input-group-container {
+    display: flex;
+    gap: 8px;
     align-items: end;
+}
+
+.chat-input-form {
+    width: 100%;
+}
+
+.attach-btn {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid var(--border-color);
+    font-size: 16px;
+    transition: all 0.2s ease;
+    background: var(--bg-primary);
+    color: var(--text-secondary);
+}
+
+.attach-btn:hover {
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+    transform: translateY(-1px);
+}
+
+.attach-btn.has-files {
+    border-color: var(--primary-color);
+    color: var(--primary-color);
 }
 
 .chat-input {
@@ -206,6 +379,76 @@ body {
     transform: translateY(-1px);
 }
 
+/* Message actions styling */
+.message-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 12px;
+    opacity: 0.6;
+    transition: opacity 0.2s ease;
+}
+
+.message:hover .message-actions {
+    opacity: 1;
+}
+
+.copy-btn {
+    padding: 6px 12px;
+    font-size: 12px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    border-radius: 6px;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.copy-btn:hover {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    border-color: var(--primary-color);
+}
+
+.copy-btn.text-success {
+    color: var(--success-color) !important;
+    border-color: var(--success-color) !important;
+}
+
+/* Drag and drop styling */
+.chat-input-container.drag-over {
+    background: rgba(13, 110, 253, 0.1);
+    border-color: var(--primary-color);
+}
+
+.drag-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(13, 110, 253, 0.1);
+    backdrop-filter: blur(2px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    pointer-events: none;
+}
+
+.drag-overlay-content {
+    background: var(--bg-secondary);
+    border: 2px dashed var(--primary-color);
+    border-radius: 16px;
+    padding: 2rem;
+    text-align: center;
+    color: var(--primary-color);
+    font-size: 18px;
+    font-weight: 600;
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar {
     width: 6px;
@@ -224,40 +467,6 @@ body {
     background: var(--text-secondary);
 }
 
-/* Message actions */
-.message-actions {
-    display: flex;
-    justify-content: flex-end;
-    margin-top: 12px;
-    opacity: 0.6;
-    transition: opacity 0.2s ease;
-}
-
-.message:hover .message-actions {
-    opacity: 1;
-}
-
-.copy-btn {
-    padding: 4px 8px;
-    font-size: 12px;
-    border: 1px solid var(--border-color);
-    background: var(--bg-tertiary);
-    color: var(--text-secondary);
-    border-radius: 6px;
-    transition: all 0.2s ease;
-}
-
-.copy-btn:hover {
-    background: var(--bg-primary);
-    color: var(--text-primary);
-    border-color: var(--primary-color);
-}
-
-.copy-btn.text-success {
-    color: #28a745 !important;
-    border-color: #28a745 !important;
-}
-
 /* Responsive */
 @media (max-width: 768px) {
     .chat-messages {
@@ -271,5 +480,33 @@ body {
     
     .message-actions {
         opacity: 1;
+    }
+    
+    .code-copy-btn {
+        opacity: 1 !important;
+        top: 4px !important;
+        right: 4px !important;
+        padding: 2px 6px !important;
+        font-size: 10px !important;
+    }
+    
+    .file-list {
+        flex-direction: column;
+    }
+    
+    .file-item {
+        width: 100%;
+    }
+    
+    .input-group-container {
+        flex-wrap: wrap;
+    }
+    
+    .attach-btn {
+        order: -1;
+        width: 100%;
+        border-radius: 12px;
+        height: 40px;
+        margin-bottom: 8px;
     }
 }

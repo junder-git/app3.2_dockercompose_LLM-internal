@@ -16,6 +16,29 @@ local MODEL_NUM_PREDICT = tonumber(os.getenv("MODEL_NUM_PREDICT") or "512")
 -- User ID (always admin1 for internal)
 local USER_ID = "admin1"
 
+-- Helper function to format files for AI context
+local function format_files_for_context(files)
+    if not files or #files == 0 then
+        return ""
+    end
+    
+    local file_context = "\n\n--- ATTACHED FILES ---\n"
+    
+    for _, file in ipairs(files) do
+        file_context = file_context .. "\nFile: " .. (file.name or "unknown")
+        file_context = file_context .. "\nType: " .. (file.type or "unknown")
+        file_context = file_context .. "\nSize: " .. (file.size or "unknown") .. " bytes"
+        
+        if file.content then
+            file_context = file_context .. "\nContent:\n```\n" .. file.content .. "\n```"
+        end
+        
+        file_context = file_context .. "\n---\n"
+    end
+    
+    return file_context
+end
+
 -- Serve the chat HTML page
 function _M.serve_chat_page()
     local file = io.open("/usr/local/openresty/nginx/static/chat.html", "r")
@@ -84,7 +107,7 @@ function _M.handle_clear_chat()
     ngx.say(cjson.encode({success = true}))
 end
 
--- Handle streaming chat
+-- Handle streaming chat with file support
 function _M.handle_chat_stream()
     if ngx.req.get_method() ~= "POST" then
         ngx.status = 405
@@ -103,13 +126,21 @@ function _M.handle_chat_stream()
     end
     
     local ok, request_data = pcall(cjson.decode, body)
-    if not ok or not request_data.message then
+    if not ok then
         ngx.status = 400
-        ngx.say("Invalid JSON or missing message")
+        ngx.say("Invalid JSON")
         return
     end
     
-    local user_message = request_data.message
+    local user_message = request_data.message or ""
+    local files = request_data.files or {}
+    
+    -- If no message and no files, return error
+    if user_message == "" and #files == 0 then
+        ngx.status = 400
+        ngx.say("No message or files provided")
+        return
+    end
     
     -- Connect to Redis
     local redis = redis_client.connect()
@@ -131,21 +162,40 @@ function _M.handle_chat_stream()
         end
     end
     
-    -- Add user message to history
-    table.insert(messages, {
+    -- Prepare the complete user message with file context
+    local complete_message = user_message
+    local file_context = format_files_for_context(files)
+    
+    if file_context ~= "" then
+        complete_message = complete_message .. file_context
+    end
+    
+    -- Add user message to history (store original message + file info separately for UI)
+    local user_message_entry = {
         role = "user",
         content = user_message,
+        files = files,
         timestamp = ngx.time()
-    })
+    }
+    table.insert(messages, user_message_entry)
     
-    -- Prepare context for Ollama (last 10 messages)
+    -- Prepare context for Ollama (last 10 messages, but include file context in the actual content)
     local context_messages = {}
     local start_idx = math.max(1, #messages - 9)
     
     for i = start_idx, #messages do
+        local msg = messages[i]
+        local role = msg.role == "user" and "user" or "assistant"
+        local content = msg.content
+        
+        -- For the current user message, include file context
+        if i == #messages and msg.role == "user" and file_context ~= "" then
+            content = content .. file_context
+        end
+        
         table.insert(context_messages, {
-            role = messages[i].role == "user" and "user" or "assistant",
-            content = messages[i].content
+            role = role,
+            content = content
         })
     end
     

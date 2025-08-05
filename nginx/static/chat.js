@@ -1,9 +1,10 @@
-// Simple internal chat client
+// Simple internal chat client with file upload support
 class InternalChat {
     constructor() {
         this.isTyping = false;
         this.abortController = null;
         this.messageCount = 0;
+        this.attachedFiles = [];
         
         this.init();
     }
@@ -12,7 +13,8 @@ class InternalChat {
         this.setupEventListeners();
         this.loadChatHistory();
         this.setupMarkdown();
-        console.log('Internal chat initialized');
+        this.setupFileUpload();
+        console.log('Internal chat initialized with file upload support');
     }
     
     setupMarkdown() {
@@ -47,7 +49,7 @@ class InternalChat {
             chatInput.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
-                    if (chatInput.value.trim()) {
+                    if (chatInput.value.trim() || this.attachedFiles.length > 0) {
                         this.sendMessage();
                     }
                 }
@@ -59,6 +61,198 @@ class InternalChat {
         if (stopButton) {
             stopButton.addEventListener('click', () => this.stopGeneration());
         }
+        
+        // Attach button
+        const attachButton = document.getElementById('attach-button');
+        if (attachButton) {
+            attachButton.addEventListener('click', () => this.triggerFileInput());
+        }
+        
+        // File input
+        const fileInput = document.getElementById('file-input');
+        if (fileInput) {
+            fileInput.addEventListener('change', (e) => this.handleFileSelect(e));
+        }
+        
+        // Drag and drop
+        this.setupDragAndDrop();
+    }
+    
+    setupFileUpload() {
+        // Initialize file upload UI
+        this.updateFileUploadUI();
+    }
+    
+    setupDragAndDrop() {
+        const chatContainer = document.querySelector('.chat-input-container');
+        
+        // Prevent default drag behaviors
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            chatContainer.addEventListener(eventName, this.preventDefaults, false);
+            document.body.addEventListener(eventName, this.preventDefaults, false);
+        });
+        
+        // Highlight drop area when item is dragged over it
+        ['dragenter', 'dragover'].forEach(eventName => {
+            chatContainer.addEventListener(eventName, () => this.highlight(chatContainer), false);
+        });
+        
+        ['dragleave', 'drop'].forEach(eventName => {
+            chatContainer.addEventListener(eventName, () => this.unhighlight(chatContainer), false);
+        });
+        
+        // Handle dropped files
+        chatContainer.addEventListener('drop', (e) => this.handleDrop(e), false);
+    }
+    
+    preventDefaults(e) {
+        e.preventDefault();
+        e.stopPropagation();
+    }
+    
+    highlight(element) {
+        element.classList.add('drag-over');
+    }
+    
+    unhighlight(element) {
+        element.classList.remove('drag-over');
+    }
+    
+    handleDrop(e) {
+        const dt = e.dataTransfer;
+        const files = dt.files;
+        this.addFiles(files);
+    }
+    
+    triggerFileInput() {
+        const fileInput = document.getElementById('file-input');
+        if (fileInput) {
+            fileInput.click();
+        }
+    }
+    
+    handleFileSelect(e) {
+        const files = e.target.files;
+        this.addFiles(files);
+        // Clear the input so the same file can be selected again
+        e.target.value = '';
+    }
+    
+    addFiles(files) {
+        Array.from(files).forEach(file => {
+            // Check if file already exists
+            const existingFile = this.attachedFiles.find(f => 
+                f.name === file.name && f.size === file.size && f.lastModified === file.lastModified
+            );
+            
+            if (!existingFile) {
+                this.attachedFiles.push(file);
+            }
+        });
+        
+        this.updateFileUploadUI();
+    }
+    
+    removeFile(index) {
+        this.attachedFiles.splice(index, 1);
+        this.updateFileUploadUI();
+    }
+    
+    clearAllFiles() {
+        this.attachedFiles = [];
+        this.updateFileUploadUI();
+    }
+    
+    updateFileUploadUI() {
+        const fileUploadArea = document.getElementById('file-upload-area');
+        const fileList = document.getElementById('file-list');
+        const attachButton = document.getElementById('attach-button');
+        const fileCount = document.getElementById('file-count');
+        const fileCountNumber = document.getElementById('file-count-number');
+        
+        if (this.attachedFiles.length > 0) {
+            // Show upload area
+            if (fileUploadArea) {
+                fileUploadArea.style.display = 'block';
+            }
+            
+            // Update file list
+            if (fileList) {
+                fileList.innerHTML = '';
+                this.attachedFiles.forEach((file, index) => {
+                    const fileItem = this.createFileItem(file, index);
+                    fileList.appendChild(fileItem);
+                });
+            }
+            
+            // Update attach button style
+            if (attachButton) {
+                attachButton.classList.add('has-files');
+            }
+            
+            // Show file count
+            if (fileCount && fileCountNumber) {
+                fileCount.style.display = 'inline';
+                fileCountNumber.textContent = this.attachedFiles.length;
+            }
+        } else {
+            // Hide upload area
+            if (fileUploadArea) {
+                fileUploadArea.style.display = 'none';
+            }
+            
+            // Update attach button style
+            if (attachButton) {
+                attachButton.classList.remove('has-files');
+            }
+            
+            // Hide file count
+            if (fileCount) {
+                fileCount.style.display = 'none';
+            }
+        }
+    }
+    
+    createFileItem(file, index) {
+        const fileItem = document.createElement('div');
+        fileItem.className = 'file-item';
+        
+        const icon = this.getFileIcon(file.type);
+        const size = this.formatFileSize(file.size);
+        
+        fileItem.innerHTML = `
+            <i class="bi ${icon}"></i>
+            <div class="file-item-info">
+                <div class="file-item-name">${file.name}</div>
+                <div class="file-item-size">${size}</div>
+            </div>
+            <button type="button" class="file-item-remove" onclick="window.chat.removeFile(${index})" title="Remove file">
+                <i class="bi bi-x"></i>
+            </button>
+        `;
+        
+        return fileItem;
+    }
+    
+    getFileIcon(mimeType) {
+        if (mimeType.startsWith('image/')) return 'bi-file-earmark-image';
+        if (mimeType.startsWith('video/')) return 'bi-file-earmark-play';
+        if (mimeType.startsWith('audio/')) return 'bi-file-earmark-music';
+        if (mimeType.includes('pdf')) return 'bi-file-earmark-pdf';
+        if (mimeType.includes('word')) return 'bi-file-earmark-word';
+        if (mimeType.includes('excel') || mimeType.includes('spreadsheet')) return 'bi-file-earmark-excel';
+        if (mimeType.includes('powerpoint') || mimeType.includes('presentation')) return 'bi-file-earmark-ppt';
+        if (mimeType.includes('zip') || mimeType.includes('archive')) return 'bi-file-earmark-zip';
+        if (mimeType.includes('text') || mimeType.includes('json') || mimeType.includes('xml')) return 'bi-file-earmark-text';
+        return 'bi-file-earmark';
+    }
+    
+    formatFileSize(bytes) {
+        if (bytes === 0) return '0 B';
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
     }
     
     updateCharCount() {
@@ -84,6 +278,7 @@ class InternalChat {
         const sendButton = document.getElementById('send-button');
         const stopButton = document.getElementById('stop-button');
         const chatInput = document.getElementById('chat-input');
+        const attachButton = document.getElementById('attach-button');
         const status = document.getElementById('status');
         
         if (sendButton) {
@@ -95,6 +290,9 @@ class InternalChat {
         }
         if (chatInput) {
             chatInput.disabled = isTyping;
+        }
+        if (attachButton) {
+            attachButton.disabled = isTyping;
         }
         if (status) {
             status.textContent = isTyping ? 'Thinking...' : 'Ready';
@@ -108,7 +306,7 @@ class InternalChat {
         }
     }
     
-    addMessage(sender, content, isStreaming = false) {
+    addMessage(sender, content, isStreaming = false, files = []) {
         const messagesContainer = document.getElementById('messages-content');
         if (!messagesContainer) return null;
         
@@ -141,6 +339,33 @@ class InternalChat {
         headerDiv.appendChild(avatarDiv);
         headerDiv.appendChild(labelSpan);
         
+        // Files (for user messages)
+        if (files && files.length > 0) {
+            const filesDiv = document.createElement('div');
+            filesDiv.className = 'message-files';
+            
+            files.forEach(file => {
+                const fileItem = document.createElement('div');
+                fileItem.className = 'message-file-item';
+                
+                const icon = this.getFileIcon(file.type);
+                const size = this.formatFileSize(file.size);
+                
+                fileItem.innerHTML = `
+                    <i class="bi ${icon}"></i>
+                    <span>${file.name}</span>
+                    <small>(${size})</small>
+                `;
+                
+                filesDiv.appendChild(fileItem);
+            });
+            
+            messageDiv.appendChild(headerDiv);
+            messageDiv.appendChild(filesDiv);
+        } else {
+            messageDiv.appendChild(headerDiv);
+        }
+        
         // Content
         const contentDiv = document.createElement('div');
         contentDiv.className = 'message-content';
@@ -154,15 +379,10 @@ class InternalChat {
         } else {
             contentDiv.innerHTML = window.marked ? marked.parse(content) : content;
             
-            // Apply syntax highlighting
-            if (window.Prism) {
-                contentDiv.querySelectorAll('pre code').forEach((block) => {
-                    Prism.highlightElement(block);
-                });
-            }
+            // Apply syntax highlighting and add copy buttons to code blocks
+            this.enhanceCodeBlocks(contentDiv, content);
         }
         
-        messageDiv.appendChild(headerDiv);
         messageDiv.appendChild(contentDiv);
         messagesContainer.appendChild(messageDiv);
         
@@ -170,18 +390,116 @@ class InternalChat {
         return messageDiv;
     }
     
+    enhanceCodeBlocks(contentDiv, originalContent) {
+        // Apply syntax highlighting
+        if (window.Prism) {
+            contentDiv.querySelectorAll('pre code').forEach((block) => {
+                Prism.highlightElement(block);
+            });
+        }
+        
+        // Add copy buttons to each code block
+        contentDiv.querySelectorAll('pre').forEach((preElement, index) => {
+            this.addCopyButtonToCodeBlock(preElement, originalContent);
+        });
+        
+        // Add overall message copy button
+        this.addMessageCopyButton(contentDiv, originalContent);
+    }
+    
+    addCopyButtonToCodeBlock(preElement, originalContent) {
+        // Get the code content from the code element inside pre
+        const codeElement = preElement.querySelector('code');
+        if (!codeElement) return;
+        
+        const codeText = codeElement.textContent || codeElement.innerText;
+        
+        // Create wrapper for positioning
+        const wrapper = document.createElement('div');
+        wrapper.style.position = 'relative';
+        wrapper.style.marginBottom = '1rem';
+        
+        // Create copy button
+        const copyButton = document.createElement('button');
+        copyButton.className = 'btn btn-outline-secondary btn-sm code-copy-btn';
+        copyButton.innerHTML = '<i class="bi bi-clipboard"></i>';
+        copyButton.title = 'Copy code';
+        copyButton.style.cssText = `
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            z-index: 10;
+            padding: 4px 8px;
+            font-size: 12px;
+            opacity: 0.7;
+            transition: opacity 0.2s ease;
+        `;
+        
+        copyButton.addEventListener('mouseenter', () => {
+            copyButton.style.opacity = '1';
+        });
+        
+        copyButton.addEventListener('mouseleave', () => {
+            copyButton.style.opacity = '0.7';
+        });
+        
+        copyButton.onclick = (e) => {
+            e.stopPropagation();
+            this.copyToClipboard(codeText, copyButton);
+        };
+        
+        // Wrap the pre element and add the button
+        preElement.parentNode.insertBefore(wrapper, preElement);
+        wrapper.appendChild(preElement);
+        wrapper.appendChild(copyButton);
+    }
+    
+    addMessageCopyButton(contentDiv, content) {
+        // Add overall message copy button
+        const copyButton = document.createElement('button');
+        copyButton.className = 'btn btn-outline-secondary btn-sm copy-btn';
+        copyButton.innerHTML = '<i class="bi bi-clipboard"></i> Copy message';
+        copyButton.title = 'Copy entire message';
+        copyButton.onclick = () => this.copyToClipboard(content, copyButton);
+        
+        const buttonWrapper = document.createElement('div');
+        buttonWrapper.className = 'message-actions';
+        buttonWrapper.appendChild(copyButton);
+        
+        contentDiv.appendChild(buttonWrapper);
+    }
+    
     async sendMessage() {
         const input = document.getElementById('chat-input');
         if (!input) return;
         
         const message = input.value.trim();
-        if (!message || this.isTyping) return;
+        if (!message && this.attachedFiles.length === 0) return;
+        if (this.isTyping) return;
         
-        // Add user message
-        this.addMessage('user', message);
+        // Prepare message content with file information
+        let messageContent = message;
+        const filesToSend = [...this.attachedFiles]; // Copy the array
         
-        // Clear input
+        if (filesToSend.length > 0) {
+            // Add file information to the message
+            const fileInfo = filesToSend.map(file => 
+                `📎 ${file.name} (${this.formatFileSize(file.size)})`
+            ).join('\n');
+            
+            if (messageContent) {
+                messageContent = `${messageContent}\n\n${fileInfo}`;
+            } else {
+                messageContent = fileInfo;
+            }
+        }
+        
+        // Add user message with files
+        this.addMessage('user', messageContent, false, filesToSend);
+        
+        // Clear input and files
         input.value = '';
+        this.clearAllFiles();
         this.updateCharCount();
         this.autoResizeTextarea();
         
@@ -194,21 +512,50 @@ class InternalChat {
         const aiMessage = this.addMessage('ai', '', true);
         
         try {
-            await this.streamResponse(message, aiMessage);
+            await this.streamResponse(message, aiMessage, filesToSend);
         } catch (error) {
             console.error('Chat error:', error);
             this.handleError(error, aiMessage);
         }
     }
     
-    async streamResponse(message, aiMessage) {
+    async streamResponse(message, aiMessage, files = []) {
+        // Prepare the request body
+        const requestBody = {
+            message: message,
+            files: []
+        };
+        
+        // Process files - convert to base64 for text files, or just metadata for others
+        if (files && files.length > 0) {
+            for (const file of files) {
+                try {
+                    const fileData = {
+                        name: file.name,
+                        type: file.type,
+                        size: file.size
+                    };
+                    
+                    // For text-based files, include content
+                    if (this.isTextFile(file)) {
+                        const content = await this.readFileAsText(file);
+                        fileData.content = content;
+                    }
+                    
+                    requestBody.files.push(fileData);
+                } catch (error) {
+                    console.error('Error processing file:', file.name, error);
+                }
+            }
+        }
+        
         const response = await fetch('/api/chat/stream', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'Accept': 'text/event-stream'
             },
-            body: JSON.stringify({ message }),
+            body: JSON.stringify(requestBody),
             signal: this.abortController.signal
         });
         
@@ -253,6 +600,29 @@ class InternalChat {
         this.finishStreaming(aiMessage, accumulated);
     }
     
+    isTextFile(file) {
+        const textTypes = [
+            'text/',
+            'application/json',
+            'application/xml',
+            'application/javascript',
+            'application/csv',
+            'application/sql'
+        ];
+        
+        return textTypes.some(type => file.type.startsWith(type)) || 
+               file.name.match(/\.(txt|md|json|xml|csv|sql|js|ts|py|java|cpp|c|h|css|html|yml|yaml|toml|ini|cfg|conf|log)$/i);
+    }
+    
+    readFileAsText(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => resolve(e.target.result);
+            reader.onerror = (e) => reject(e);
+            reader.readAsText(file);
+        });
+    }
+    
     updateStreamingContent(messageElement, content) {
         const contentDiv = messageElement.querySelector('.streaming-content');
         if (contentDiv) {
@@ -265,33 +635,16 @@ class InternalChat {
     finishStreaming(messageElement, finalContent) {
         const contentDiv = messageElement.querySelector('.message-content');
         if (contentDiv) {
-            // Remove streaming class and add final content with copy button
+            // Remove streaming class and add final content
             contentDiv.innerHTML = '';
             
             // Create content wrapper
             const contentWrapper = document.createElement('div');
             contentWrapper.innerHTML = window.marked ? marked.parse(finalContent) : finalContent;
-            
-            // Add copy button
-            const copyButton = document.createElement('button');
-            copyButton.className = 'btn btn-outline-secondary btn-sm copy-btn';
-            copyButton.innerHTML = '<i class="bi bi-clipboard"></i>';
-            copyButton.title = 'Copy to clipboard';
-            copyButton.onclick = () => this.copyToClipboard(finalContent, copyButton);
-            
-            const buttonWrapper = document.createElement('div');
-            buttonWrapper.className = 'message-actions';
-            buttonWrapper.appendChild(copyButton);
-            
             contentDiv.appendChild(contentWrapper);
-            contentDiv.appendChild(buttonWrapper);
             
-            // Apply syntax highlighting
-            if (window.Prism) {
-                contentDiv.querySelectorAll('pre code').forEach((block) => {
-                    Prism.highlightElement(block);
-                });
-            }
+            // Enhance with copy buttons for code blocks and message
+            this.enhanceCodeBlocks(contentDiv, finalContent);
         }
         
         this.isTyping = false;
@@ -305,12 +658,12 @@ class InternalChat {
             await navigator.clipboard.writeText(text);
             
             // Visual feedback
-            const originalIcon = button.innerHTML;
+            const originalContent = button.innerHTML;
             button.innerHTML = '<i class="bi bi-check"></i>';
             button.classList.add('text-success');
             
             setTimeout(() => {
-                button.innerHTML = originalIcon;
+                button.innerHTML = originalContent;
                 button.classList.remove('text-success');
             }, 2000);
             
@@ -327,12 +680,12 @@ class InternalChat {
                 document.execCommand('copy');
                 
                 // Visual feedback
-                const originalIcon = button.innerHTML;
+                const originalContent = button.innerHTML;
                 button.innerHTML = '<i class="bi bi-check"></i>';
                 button.classList.add('text-success');
                 
                 setTimeout(() => {
-                    button.innerHTML = originalIcon;
+                    button.innerHTML = originalContent;
                     button.classList.remove('text-success');
                 }, 2000);
                 
@@ -388,15 +741,8 @@ class InternalChat {
                     
                     // Add each message
                     data.messages.forEach(msg => {
-                        this.addMessage(msg.role, msg.content);
-                        
-                        // Add copy button to AI messages
-                        if (msg.role === 'ai') {
-                            const lastMessage = document.querySelector('.message-ai:last-child');
-                            if (lastMessage) {
-                                this.addCopyButtonToMessage(lastMessage, msg.content);
-                            }
-                        }
+                        const files = msg.files || [];
+                        this.addMessage(msg.role, msg.content, false, files);
                     });
                     
                     this.scrollToBottom();
@@ -404,23 +750,6 @@ class InternalChat {
             }
         } catch (error) {
             console.error('Failed to load chat history:', error);
-        }
-    }
-    
-    addCopyButtonToMessage(messageElement, content) {
-        const contentDiv = messageElement.querySelector('.message-content');
-        if (contentDiv && !messageElement.querySelector('.copy-btn')) {
-            const copyButton = document.createElement('button');
-            copyButton.className = 'btn btn-outline-secondary btn-sm copy-btn';
-            copyButton.innerHTML = '<i class="bi bi-clipboard"></i>';
-            copyButton.title = 'Copy to clipboard';
-            copyButton.onclick = () => this.copyToClipboard(content, copyButton);
-            
-            const buttonWrapper = document.createElement('div');
-            buttonWrapper.className = 'message-actions';
-            buttonWrapper.appendChild(copyButton);
-            
-            contentDiv.appendChild(buttonWrapper);
         }
     }
 }
@@ -456,6 +785,13 @@ async function clearAllHistory() {
     } catch (error) {
         console.error('Error clearing chat:', error);
         alert('Failed to clear chat history. Please try again.');
+    }
+}
+
+// Clear all files function
+function clearAllFiles() {
+    if (window.chat) {
+        window.chat.clearAllFiles();
     }
 }
 

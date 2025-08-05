@@ -43,7 +43,7 @@
                 <h4><i class="bi bi-chat-dots text-primary"></i> Internal AI Chat</h4>
                 <p>Direct connection to your Ollama model. No authentication required.</p>
                 <div class="text-muted">
-                    <small>💡 <kbd>Enter</kbd> to send • <kbd>Shift+Enter</kbd> for new line</small>
+                    <small>💡 <kbd>Enter</kbd> to send • <kbd>Shift+Enter</kbd> for new line • <kbd>📎</kbd> to attach files</small>
                 </div>
             </div>
             
@@ -53,26 +53,48 @@
         
         <!-- Input area -->
         <div class="chat-input-container">
+            <!-- File upload area (hidden by default) -->
+            <div id="file-upload-area" class="file-upload-area" style="display: none;">
+                <div class="file-upload-header">
+                    <span><i class="bi bi-paperclip"></i> Attached Files</span>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearAllFiles()">
+                        <i class="bi bi-x"></i> Clear All
+                    </button>
+                </div>
+                <div id="file-list" class="file-list"></div>
+            </div>
+            
             <form id="chat-form" class="chat-input-form">
-                <textarea 
-                    class="form-control chat-input" 
-                    id="chat-input" 
-                    placeholder="Ask anything..." 
-                    rows="1"
-                    required></textarea>
-                
-                <button type="submit" class="btn btn-primary btn-send" id="send-button">
-                    <i class="bi bi-send"></i>
-                </button>
-                
-                <button type="button" class="btn btn-danger btn-send" id="stop-button" style="display: none;">
-                    <i class="bi bi-stop"></i>
-                </button>
+                <div class="input-group-container">
+                    <!-- File upload button -->
+                    <button type="button" class="btn btn-outline-secondary attach-btn" id="attach-button" title="Attach files">
+                        <i class="bi bi-paperclip"></i>
+                    </button>
+                    
+                    <!-- Hidden file input -->
+                    <input type="file" id="file-input" multiple accept="*/*" style="display: none;">
+                    
+                    <textarea 
+                        class="form-control chat-input" 
+                        id="chat-input" 
+                        placeholder="Ask anything..." 
+                        rows="1"
+                        required></textarea>
+                    
+                    <button type="submit" class="btn btn-primary btn-send" id="send-button">
+                        <i class="bi bi-send"></i>
+                    </button>
+                    
+                    <button type="button" class="btn btn-danger btn-send" id="stop-button" style="display: none;">
+                        <i class="bi bi-stop"></i>
+                    </button>
+                </div>
             </form>
             
             <div class="d-flex justify-content-between align-items-center mt-2">
                 <small class="text-muted">
                     <span id="char-count">0</span> characters
+                    <span id="file-count" style="display: none;"> • <span id="file-count-number">0</span> files</span>
                 </small>
                 <small class="text-muted" id="status">Ready</small>
             </div>
