@@ -2,7 +2,7 @@
 .message-content pre {
     background: #2d2d2d;
     border-radius: 8px;
-    padding: 1rem;
+    padding: 2.5rem 1rem 1rem 1rem; /* Increased top padding from 1rem to 2.5rem */
     overflow-x: auto;
     margin: 1rem 0;
     border: 1px solid var(--border-color);
