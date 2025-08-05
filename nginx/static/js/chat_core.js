@@ -1,4 +1,4 @@
-// Core chat functionality
+// Core chat functionality - Redis Backend
 class InternalChat {
     constructor() {
         this.isTyping = false;
@@ -22,7 +22,7 @@ class InternalChat {
         this.setupSidebar();
         this.loadChatList();
         this.createNewChat(); // Start with a new chat
-        console.log('Multi-chat internal chat initialized');
+        console.log('Multi-chat internal chat initialized (Redis backend)');
     }
     
     setupMarkdown() {
@@ -108,39 +108,31 @@ class InternalChat {
         
         this.chats.set(chatId, chat);
         this.switchToChat(chatId);
-        this.ui.updateChatList();
-        this.saveChatList();
+        this.loadChatList(); // Reload from Redis to get updated list
         
         return chatId;
     }
     
     switchToChat(chatId) {
-        if (!this.chats.has(chatId)) {
-            console.error('Chat not found:', chatId);
+        if (!chatId) {
+            console.error('Invalid chat ID');
             return;
         }
         
-        // Save current chat if switching away
-        if (this.currentChatId && this.currentChatId !== chatId) {
-            this.saveCurrentChatMessages();
-        }
-        
         this.currentChatId = chatId;
-        const chat = this.chats.get(chatId);
         
         // Set artifact system chat ID
         this.artifacts.setChatId(chatId);
         
-        // Update UI
-        this.ui.updateCurrentChatTitle(chat.title);
-        this.loadChatMessages(chat.messages);
+        // Load chat messages from Redis
+        this.loadChatMessages(chatId);
         this.ui.updateChatListActiveState();
         
         // Clear any attached files when switching chats
         this.fileUpload.clearAllFiles();
     }
     
-    loadChatMessages(messages) {
+    async loadChatMessages(chatId) {
         const messagesContainer = document.getElementById('messages-content');
         const welcomePrompt = document.getElementById('welcome-prompt');
         
@@ -149,98 +141,119 @@ class InternalChat {
         // Clear current messages
         messagesContainer.innerHTML = '';
         
-        if (messages.length === 0) {
-            // Show welcome prompt for empty chats
+        try {
+            const response = await fetch(`/api/chat/history?chat_id=${chatId}`);
+            if (!response.ok) {
+                throw new Error('Failed to load chat history');
+            }
+            
+            const data = await response.json();
+            const messages = data.messages || [];
+            
+            if (messages.length === 0) {
+                // Show welcome prompt for empty chats
+                if (welcomePrompt) {
+                    welcomePrompt.style.display = 'block';
+                }
+                
+                // Update chat title
+                this.ui.updateCurrentChatTitle('New Chat');
+            } else {
+                // Hide welcome prompt and load messages
+                if (welcomePrompt) {
+                    welcomePrompt.style.display = 'none';
+                }
+                
+                // Update chat title from first user message if available
+                const firstUserMessage = messages.find(msg => msg.role === 'user');
+                if (firstUserMessage) {
+                    const title = firstUserMessage.content.length > 30 ? 
+                        firstUserMessage.content.substring(0, 30) + '...' : 
+                        firstUserMessage.content;
+                    this.ui.updateCurrentChatTitle(title);
+                }
+                
+                // Load messages and process with artifacts
+                for (const msg of messages) {
+                    const messageElement = this.addMessageFromRedis(msg);
+                    
+                    // Process with artifacts system using the Redis-provided ID
+                    if (messageElement && msg.id) {
+                        const messageType = msg.role === 'user' ? 'in' : 'out';
+                        this.artifacts.processMessageElement(
+                            messageElement, 
+                            messageType, 
+                            msg.content, 
+                            msg.files || [], 
+                            msg.id
+                        );
+                    }
+                }
+                
+                this.ui.scrollToBottom();
+            }
+        } catch (error) {
+            console.error('Failed to load chat messages:', error);
             if (welcomePrompt) {
                 welcomePrompt.style.display = 'block';
             }
-        } else {
-            // Hide welcome prompt and load messages
-            if (welcomePrompt) {
-                welcomePrompt.style.display = 'none';
-            }
-            
-            messages.forEach(msg => {
-                const messageElement = this.addMessage(msg.role, msg.content, false, msg.files || []);
-                
-                // Process existing messages with artifacts system
-                if (messageElement && this.currentChatId) {
-                    const messageType = msg.role === 'user' ? 'in' : 'out';
-                    // Don't double-process if already processed
-                    if (!messageElement.hasAttribute('data-artifact-id')) {
-                        this.artifacts.processMessageElement(messageElement, messageType, msg.content, msg.files || []);
-                    }
-                }
+            this.ui.updateCurrentChatTitle('Error Loading Chat');
+        }
+    }
+    
+    async deleteChat(chatId) {
+        if (!chatId) return;
+        
+        try {
+            const response = await fetch('/api/chat/delete', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ chat_id: chatId })
             });
             
-            this.ui.scrollToBottom();
-        }
-    }
-    
-    saveCurrentChatMessages() {
-        if (!this.currentChatId) return;
-        
-        const chat = this.chats.get(this.currentChatId);
-        if (!chat) return;
-        
-        // Messages are automatically saved when added, but this ensures consistency
-        this.saveChatToStorage(chat);
-    }
-    
-    deleteChat(chatId) {
-        if (!this.chats.has(chatId)) return;
-        
-        this.chats.delete(chatId);
-        
-        // If deleting current chat, switch to another or create new
-        if (this.currentChatId === chatId) {
-            const remainingChats = Array.from(this.chats.keys());
-            if (remainingChats.length > 0) {
-                this.switchToChat(remainingChats[0]);
-            } else {
-                this.createNewChat();
+            if (response.ok) {
+                // Remove from local cache
+                this.chats.delete(chatId);
+                
+                // If deleting current chat, switch to another or create new
+                if (this.currentChatId === chatId) {
+                    await this.loadChatList();
+                    const remainingChats = Array.from(this.chats.keys());
+                    if (remainingChats.length > 0) {
+                        this.switchToChat(remainingChats[0]);
+                    } else {
+                        this.createNewChat();
+                    }
+                } else {
+                    await this.loadChatList();
+                }
             }
+        } catch (error) {
+            console.error('Failed to delete chat:', error);
         }
-        
-        this.ui.updateChatList();
-        this.saveChatList();
-        this.deleteChatFromStorage(chatId);
     }
     
-    renameChat(chatId, newTitle) {
+    async renameChat(chatId, newTitle) {
+        // For now, just update local cache - you might want to add a Redis endpoint for this
         const chat = this.chats.get(chatId);
-        if (!chat) return;
-        
-        chat.title = newTitle;
-        chat.updatedAt = new Date();
-        
-        if (chatId === this.currentChatId) {
-            this.ui.updateCurrentChatTitle(newTitle);
+        if (chat) {
+            chat.title = newTitle;
+            chat.updatedAt = new Date();
+            
+            if (chatId === this.currentChatId) {
+                this.ui.updateCurrentChatTitle(newTitle);
+            }
+            
+            this.ui.updateChatList();
         }
-        
-        this.ui.updateChatList();
-        this.saveChatToStorage(chat);
     }
     
-    duplicateChat(chatId) {
-        const originalChat = this.chats.get(chatId);
-        if (!originalChat) return;
-        
-        const newChatId = this.generateChatId();
-        const duplicatedChat = {
-            id: newChatId,
-            title: originalChat.title + ' (Copy)',
-            messages: JSON.parse(JSON.stringify(originalChat.messages)), // Deep clone
-            createdAt: new Date(),
-            updatedAt: new Date()
-        };
-        
-        this.chats.set(newChatId, duplicatedChat);
-        this.switchToChat(newChatId);
-        this.ui.updateChatList();
-        this.saveChatToStorage(duplicatedChat);
-        
-        return newChatId;
+    async duplicateChat(chatId) {
+        // This would require a new Redis endpoint to duplicate a chat
+        // For now, just create a new chat
+        return this.createNewChat();
     }
     
     searchChats(query) {
@@ -275,44 +288,27 @@ class InternalChat {
         this.chatOptionsModal.show();
     }
     
-    // Storage Methods
-    saveChatList() {
+    // Load chat list from Redis
+    async loadChatList() {
         try {
-            const chatData = Array.from(this.chats.values()).map(chat => ({
-                id: chat.id,
-                title: chat.title,
-                createdAt: chat.createdAt.toISOString(),
-                updatedAt: chat.updatedAt.toISOString(),
-                messageCount: chat.messages.length
-            }));
-            
-            localStorage.setItem('internal_chat_list', JSON.stringify(chatData));
-        } catch (error) {
-            console.error('Failed to save chat list:', error);
-        }
-    }
-    
-    loadChatList() {
-        try {
-            const chatListData = localStorage.getItem('internal_chat_list');
-            if (chatListData) {
-                const chatList = JSON.parse(chatListData);
+            const response = await fetch('/api/chat/list');
+            if (response.ok) {
+                const data = await response.json();
+                const chats = data.chats || [];
                 
-                // Load basic chat info first
-                chatList.forEach(chatInfo => {
-                    if (!this.chats.has(chatInfo.id)) {
-                        const chat = {
-                            id: chatInfo.id,
-                            title: chatInfo.title,
-                            messages: [],
-                            createdAt: new Date(chatInfo.createdAt),
-                            updatedAt: new Date(chatInfo.updatedAt)
-                        };
-                        this.chats.set(chatInfo.id, chat);
-                        
-                        // Load messages lazily when needed
-                        this.loadChatFromStorage(chatInfo.id);
-                    }
+                // Update local cache
+                this.chats.clear();
+                chats.forEach(chatInfo => {
+                    const chat = {
+                        id: chatInfo.id,
+                        title: this.generateTitleFromPreview(chatInfo.preview),
+                        messages: [], // Will be loaded when needed
+                        createdAt: new Date(),
+                        updatedAt: new Date(chatInfo.last_updated * 1000),
+                        messageCount: chatInfo.message_count,
+                        preview: chatInfo.preview
+                    };
+                    this.chats.set(chatInfo.id, chat);
                 });
                 
                 this.ui.updateChatList();
@@ -322,49 +318,30 @@ class InternalChat {
         }
     }
     
-    saveChatToStorage(chat) {
-        try {
-            localStorage.setItem(`internal_chat_${chat.id}`, JSON.stringify({
-                id: chat.id,
-                title: chat.title,
-                messages: chat.messages,
-                createdAt: chat.createdAt.toISOString(),
-                updatedAt: chat.updatedAt.toISOString()
-            }));
-        } catch (error) {
-            console.error('Failed to save chat to storage:', error);
+    generateTitleFromPreview(preview) {
+        if (!preview || preview.trim() === '') {
+            return 'New Chat';
         }
-    }
-    
-    loadChatFromStorage(chatId) {
-        try {
-            const chatData = localStorage.getItem(`internal_chat_${chatId}`);
-            if (chatData) {
-                const parsed = JSON.parse(chatData);
-                const chat = this.chats.get(chatId);
-                
-                if (chat) {
-                    chat.messages = parsed.messages || [];
-                    chat.title = parsed.title;
-                    chat.createdAt = new Date(parsed.createdAt);
-                    chat.updatedAt = new Date(parsed.updatedAt);
-                }
-            }
-        } catch (error) {
-            console.error('Failed to load chat from storage:', error);
-        }
-    }
-    
-    deleteChatFromStorage(chatId) {
-        try {
-            localStorage.removeItem(`internal_chat_${chatId}`);
-        } catch (error) {
-            console.error('Failed to delete chat from storage:', error);
-        }
+        return preview.length > 30 ? preview.substring(0, 30) + '...' : preview;
     }
     
     // Message handling methods
+    addMessageFromRedis(messageData) {
+        const messagesContainer = document.getElementById('messages-content');
+        if (!messagesContainer) return null;
+        
+        const sender = messageData.role === 'user' ? 'user' : 'ai';
+        const content = messageData.content || '';
+        const files = messageData.files || [];
+        
+        return this.createMessageElement(sender, content, files, false);
+    }
+    
     addMessage(sender, content, isStreaming = false, files = []) {
+        return this.createMessageElement(sender, content, files, isStreaming);
+    }
+    
+    createMessageElement(sender, content, files = [], isStreaming = false) {
         const messagesContainer = document.getElementById('messages-content');
         if (!messagesContainer) return null;
         
@@ -442,36 +419,6 @@ class InternalChat {
         messageDiv.appendChild(contentDiv);
         messagesContainer.appendChild(messageDiv);
         
-        // Process with artifacts system if not streaming
-        if (!isStreaming && this.currentChatId) {
-            const messageType = sender === 'user' ? 'in' : 'out';
-            this.artifacts.processMessageElement(messageDiv, messageType, content, files);
-            
-            // Save message to current chat
-            const chat = this.chats.get(this.currentChatId);
-            if (chat) {
-                chat.messages.push({
-                    role: sender === 'user' ? 'user' : 'ai',
-                    content: content,
-                    files: files || [],
-                    timestamp: Date.now()
-                });
-                
-                chat.updatedAt = new Date();
-                
-                // Update chat title if this is the first user message
-                if (sender === 'user' && chat.messages.filter(m => m.role === 'user').length === 1) {
-                    const newTitle = content.length > 30 ? content.substring(0, 30) + '...' : content;
-                    chat.title = newTitle;
-                    this.ui.updateCurrentChatTitle(newTitle);
-                }
-                
-                this.ui.updateChatList();
-                this.saveChatToStorage(chat);
-                this.saveChatList();
-            }
-        }
-        
         this.ui.scrollToBottom();
         return messageDiv;
     }
@@ -504,7 +451,7 @@ class InternalChat {
             }
         }
         
-        // Add user message with files
+        // Add user message with files (this will be stored in Redis by the stream endpoint)
         this.addMessage('user', messageContent, false, filesToSend);
         
         // Clear input and files
@@ -628,25 +575,9 @@ class InternalChat {
             
             this.ui.enhanceCodeBlocks(contentDiv, finalContent);
             
-            // Process with artifacts system
-            if (this.currentChatId) {
-                this.artifacts.processMessageElement(messageElement, 'out', finalContent);
-                
-                // Save AI message to current chat
-                const chat = this.chats.get(this.currentChatId);
-                if (chat) {
-                    chat.messages.push({
-                        role: 'ai',
-                        content: finalContent,
-                        timestamp: Date.now()
-                    });
-                    
-                    chat.updatedAt = new Date();
-                    this.ui.updateChatList();
-                    this.saveChatToStorage(chat);
-                    this.saveChatList();
-                }
-            }
+            // Messages and artifacts are already saved in Redis by the stream endpoint
+            // Reload chat list to update message counts and timestamps
+            this.loadChatList();
         }
         
         this.isTyping = false;
@@ -685,16 +616,17 @@ class InternalChat {
         }
     }
     
-    // Artifact management methods
-    clearCurrentChatArtifacts() {
+    // Artifact management methods (Redis-based)
+    async clearCurrentChatArtifacts() {
         if (this.artifacts && this.currentChatId) {
-            this.artifacts.clearArtifacts();
+            return await this.artifacts.clearArtifacts();
         }
+        return false;
     }
     
-    exportChatArtifacts() {
+    async exportChatArtifacts() {
         if (this.artifacts) {
-            const exportData = this.artifacts.exportArtifacts();
+            const exportData = await this.artifacts.exportArtifacts();
             const blob = new Blob([exportData], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
             
@@ -708,16 +640,16 @@ class InternalChat {
         }
     }
     
-    getArtifactReference(artifactId) {
+    async getArtifactReference(artifactId) {
         if (this.artifacts) {
-            return this.artifacts.getArtifact(artifactId);
+            return await this.artifacts.getArtifact(artifactId);
         }
         return null;
     }
     
-    searchArtifacts(query, type = null) {
+    async searchArtifacts(query, type = null) {
         if (this.artifacts) {
-            return this.artifacts.searchArtifacts(query, type);
+            return await this.artifacts.searchArtifacts(query, type);
         }
         return [];
     }

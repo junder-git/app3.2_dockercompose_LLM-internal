@@ -39,14 +39,140 @@ local function format_files_for_context(files)
     return file_context
 end
 
--- Generate Redis key for chat history
-local function get_chat_key(chat_id)
-    if chat_id and chat_id ~= "" then
-        return "chat:history:" .. USER_ID .. ":" .. chat_id
-    else
-        -- Fallback to old format for compatibility
-        return "chat:history:" .. USER_ID
+-- Generate message ID using the exact format the UI expects: in(n) or out(n)
+local function generate_message_id(redis, chat_id, message_type)
+    local counter_key = "chat:counter:" .. USER_ID .. ":" .. chat_id .. ":" .. message_type
+    local counter = redis:incr(counter_key)
+    redis:expire(counter_key, 86400 * 365) -- Expire after 1 year
+    return message_type .. "(" .. counter .. ")"
+end
+
+-- Generate artifact ID for code blocks using exact UI format: in(n)_code(x) or out(n)_code(x)
+local function generate_artifact_id(parent_message_id, code_block_index)
+    return parent_message_id .. "_code(" .. code_block_index .. ")"
+end
+
+-- Save message with proper structure including artifact references
+local function save_message(redis, chat_id, message_id, role, content, files, artifacts)
+    local message_data = {
+        id = message_id,
+        role = role,
+        content = content,
+        files = files or {},
+        artifacts = artifacts or {},
+        timestamp = ngx.time(),
+        chat_id = chat_id
+    }
+    
+    -- Save individual message
+    local message_key = "message:" .. USER_ID .. ":" .. chat_id .. ":" .. message_id
+    redis:set(message_key, cjson.encode(message_data))
+    redis:expire(message_key, 86400 * 365) -- Expire after 1 year
+    
+    -- Add to ordered chat message list (newest first for easy retrieval)
+    local chat_messages_key = "chat:messages:" .. USER_ID .. ":" .. chat_id
+    redis:lpush(chat_messages_key, message_id)
+    redis:expire(chat_messages_key, 86400 * 365)
+    
+    -- Update chat metadata
+    local chat_meta_key = "chat:meta:" .. USER_ID .. ":" .. chat_id
+    local chat_meta = {
+        id = chat_id,
+        last_updated = ngx.time(),
+        message_count = redis:llen(chat_messages_key),
+        last_message_preview = string.sub(content or "", 1, 100)
+    }
+    redis:set(chat_meta_key, cjson.encode(chat_meta))
+    redis:expire(chat_meta_key, 86400 * 365)
+    
+    return message_data
+end
+
+-- Save artifact (code block) with proper parent relationship
+local function save_artifact(redis, chat_id, artifact_id, parent_message_id, code, language, metadata)
+    local artifact_data = {
+        id = artifact_id,
+        parent_id = parent_message_id,
+        type = "code_block",
+        code = code,
+        language = language or "",
+        metadata = metadata or {},
+        timestamp = ngx.time(),
+        chat_id = chat_id
+    }
+    
+    -- Save individual artifact
+    local artifact_key = "artifact:" .. USER_ID .. ":" .. chat_id .. ":" .. artifact_id
+    redis:set(artifact_key, cjson.encode(artifact_data))
+    redis:expire(artifact_key, 86400 * 365)
+    
+    -- Add to chat artifacts list
+    local chat_artifacts_key = "chat:artifacts:" .. USER_ID .. ":" .. chat_id
+    redis:lpush(chat_artifacts_key, artifact_id)
+    redis:expire(chat_artifacts_key, 86400 * 365)
+    
+    return artifact_data
+end
+
+-- Extract code blocks from content and create artifacts with proper IDs
+local function extract_and_save_code_blocks(redis, chat_id, message_id, content)
+    local artifacts = {}
+    local code_block_index = 0
+    
+    -- Match code blocks: ```language\ncode\n```
+    for lang, code in content:gmatch("```([%w]*)\n(.-)\n```") do
+        code_block_index = code_block_index + 1
+        local artifact_id = generate_artifact_id(message_id, code_block_index)
+        
+        local artifact = save_artifact(redis, chat_id, artifact_id, message_id, code, lang, {
+            extracted_from_response = true,
+            block_index = code_block_index
+        })
+        
+        table.insert(artifacts, artifact_id)
     end
+    
+    return artifacts
+end
+
+-- Get chat messages in chronological order (for display)
+local function get_chat_messages(redis, chat_id, limit)
+    local chat_messages_key = "chat:messages:" .. USER_ID .. ":" .. chat_id
+    local message_ids = redis:lrange(chat_messages_key, 0, (limit or 50) - 1)
+    
+    local messages = {}
+    if message_ids and type(message_ids) == "table" then
+        -- Reverse to get chronological order (oldest first for chat display)
+        for i = #message_ids, 1, -1 do
+            local message_key = "message:" .. USER_ID .. ":" .. chat_id .. ":" .. message_ids[i]
+            local message_json = redis:get(message_key)
+            
+            if message_json and message_json ~= ngx.null then
+                local ok, message = pcall(cjson.decode, message_json)
+                if ok then
+                    table.insert(messages, message)
+                end
+            end
+        end
+    end
+    
+    return messages
+end
+
+-- Get chat context for AI (last N messages in correct format for model)
+local function get_chat_context(redis, chat_id, context_limit)
+    local messages = get_chat_messages(redis, chat_id, context_limit or 10)
+    local context_messages = {}
+    
+    for _, msg in ipairs(messages) do
+        local role = msg.role == "user" and "user" or "assistant"
+        table.insert(context_messages, {
+            role = role,
+            content = msg.content
+        })
+    end
+    
+    return context_messages
 end
 
 -- Serve the chat HTML page
@@ -65,13 +191,18 @@ function _M.serve_chat_page()
     ngx.say(content)
 end
 
--- Get chat history from Redis
+-- Get chat history with proper message structure and artifact IDs
 function _M.handle_chat_history()
     ngx.header["Content-Type"] = "application/json"
     
-    -- Get chat_id from query parameter
     local args = ngx.req.get_uri_args()
     local chat_id = args.chat_id
+    
+    if not chat_id or chat_id == "" then
+        ngx.status = 400
+        ngx.say(cjson.encode({error = "Missing chat_id"}))
+        return
+    end
     
     local redis = redis_client.connect()
     if not redis then
@@ -80,20 +211,112 @@ function _M.handle_chat_history()
         return
     end
     
-    local history_key = get_chat_key(chat_id)
-    local messages_json = redis:get(history_key)
+    local messages = get_chat_messages(redis, chat_id, 100)
     
     redis_client.close(redis)
+    ngx.say(cjson.encode({messages = messages}))
+end
+
+-- Get message details including artifacts
+function _M.handle_message_details()
+    ngx.header["Content-Type"] = "application/json"
     
-    local messages = {}
-    if messages_json and messages_json ~= ngx.null then
-        local ok, decoded = pcall(cjson.decode, messages_json)
+    local args = ngx.req.get_uri_args()
+    local chat_id = args.chat_id
+    local message_id = args.message_id
+    
+    if not chat_id or not message_id then
+        ngx.status = 400
+        ngx.say(cjson.encode({error = "Missing chat_id or message_id"}))
+        return
+    end
+    
+    local redis = redis_client.connect()
+    if not redis then
+        ngx.status = 500
+        ngx.say(cjson.encode({error = "Redis connection failed"}))
+        return
+    end
+    
+    -- Get message
+    local message_key = "message:" .. USER_ID .. ":" .. chat_id .. ":" .. message_id
+    local message_json = redis:get(message_key)
+    
+    local result = {}
+    if message_json and message_json ~= ngx.null then
+        local ok, message = pcall(cjson.decode, message_json)
         if ok then
-            messages = decoded
+            result.message = message
+            
+            -- Get artifacts for this message
+            local artifacts = {}
+            if message.artifacts and type(message.artifacts) == "table" then
+                for _, artifact_id in ipairs(message.artifacts) do
+                    local artifact_key = "artifact:" .. USER_ID .. ":" .. chat_id .. ":" .. artifact_id
+                    local artifact_json = redis:get(artifact_key)
+                    
+                    if artifact_json and artifact_json ~= ngx.null then
+                        local ok_artifact, artifact = pcall(cjson.decode, artifact_json)
+                        if ok_artifact then
+                            table.insert(artifacts, artifact)
+                        end
+                    end
+                end
+            end
+            result.artifacts = artifacts
         end
     end
     
-    ngx.say(cjson.encode({messages = messages}))
+    redis_client.close(redis)
+    
+    if result.message then
+        ngx.say(cjson.encode(result))
+    else
+        ngx.status = 404
+        ngx.say(cjson.encode({error = "Message not found"}))
+    end
+end
+
+-- Get all artifacts for a chat
+function _M.handle_chat_artifacts()
+    ngx.header["Content-Type"] = "application/json"
+    
+    local args = ngx.req.get_uri_args()
+    local chat_id = args.chat_id
+    
+    if not chat_id then
+        ngx.status = 400
+        ngx.say(cjson.encode({error = "Missing chat_id"}))
+        return
+    end
+    
+    local redis = redis_client.connect()
+    if not redis then
+        ngx.status = 500
+        ngx.say(cjson.encode({error = "Redis connection failed"}))
+        return
+    end
+    
+    local chat_artifacts_key = "chat:artifacts:" .. USER_ID .. ":" .. chat_id
+    local artifact_ids = redis:lrange(chat_artifacts_key, 0, -1)
+    
+    local artifacts = {}
+    if artifact_ids and type(artifact_ids) == "table" then
+        for _, artifact_id in ipairs(artifact_ids) do
+            local artifact_key = "artifact:" .. USER_ID .. ":" .. chat_id .. ":" .. artifact_id
+            local artifact_json = redis:get(artifact_key)
+            
+            if artifact_json and artifact_json ~= ngx.null then
+                local ok, artifact = pcall(cjson.decode, artifact_json)
+                if ok then
+                    table.insert(artifacts, artifact)
+                end
+            end
+        end
+    end
+    
+    redis_client.close(redis)
+    ngx.say(cjson.encode({artifacts = artifacts}))
 end
 
 -- Get list of all chats for a user
@@ -107,45 +330,25 @@ function _M.handle_chat_list()
         return
     end
     
-    -- Get all chat keys for this user
-    local pattern = "chat:history:" .. USER_ID .. ":*"
+    -- Get all chat metadata
+    local pattern = "chat:meta:" .. USER_ID .. ":*"
     local keys = redis:keys(pattern)
     
     local chats = {}
     
     if keys and type(keys) == "table" then
         for _, key in ipairs(keys) do
-            -- Extract chat_id from key
-            local chat_id = string.match(key, "chat:history:" .. USER_ID .. ":(.+)")
-            
-            if chat_id then
-                local messages_json = redis:get(key)
-                local message_count = 0
-                local last_updated = nil
-                local preview = ""
-                
-                if messages_json and messages_json ~= ngx.null then
-                    local ok, messages = pcall(cjson.decode, messages_json)
-                    if ok and type(messages) == "table" then
-                        message_count = #messages
-                        
-                        -- Get last message for preview and timestamp
-                        if message_count > 0 then
-                            local last_message = messages[message_count]
-                            if last_message.content then
-                                preview = string.sub(last_message.content, 1, 100)
-                            end
-                            last_updated = last_message.timestamp or ngx.time()
-                        end
-                    end
+            local meta_json = redis:get(key)
+            if meta_json and meta_json ~= ngx.null then
+                local ok, meta = pcall(cjson.decode, meta_json)
+                if ok then
+                    table.insert(chats, {
+                        id = meta.id,
+                        message_count = meta.message_count or 0,
+                        last_updated = meta.last_updated or ngx.time(),
+                        preview = meta.last_message_preview or ""
+                    })
                 end
-                
-                table.insert(chats, {
-                    id = chat_id,
-                    message_count = message_count,
-                    last_updated = last_updated or ngx.time(),
-                    preview = preview
-                })
             end
         end
     end
@@ -159,7 +362,7 @@ function _M.handle_chat_list()
     ngx.say(cjson.encode({chats = chats}))
 end
 
--- Clear chat history
+-- Clear chat history and artifacts
 function _M.handle_clear_chat()
     if ngx.req.get_method() ~= "POST" then
         ngx.status = 405
@@ -169,44 +372,6 @@ function _M.handle_clear_chat()
     
     ngx.header["Content-Type"] = "application/json"
     
-    -- Parse request body to get chat_id
-    ngx.req.read_body()
-    local body = ngx.req.get_body_data()
-    local chat_id = nil
-    
-    if body then
-        local ok, request_data = pcall(cjson.decode, body)
-        if ok and request_data.chat_id then
-            chat_id = request_data.chat_id
-        end
-    end
-    
-    local redis = redis_client.connect()
-    if not redis then
-        ngx.status = 500
-        ngx.say(cjson.encode({error = "Redis connection failed"}))
-        return
-    end
-    
-    local history_key = get_chat_key(chat_id)
-    redis:del(history_key)
-    
-    redis_client.close(redis)
-    
-    ngx.say(cjson.encode({success = true}))
-end
-
--- Delete a specific chat
-function _M.handle_delete_chat()
-    if ngx.req.get_method() ~= "POST" then
-        ngx.status = 405
-        ngx.say(cjson.encode({error = "Method not allowed"}))
-        return
-    end
-    
-    ngx.header["Content-Type"] = "application/json"
-    
-    -- Parse request body to get chat_id
     ngx.req.read_body()
     local body = ngx.req.get_body_data()
     
@@ -232,14 +397,119 @@ function _M.handle_delete_chat()
         return
     end
     
-    local history_key = get_chat_key(chat_id)
-    local result = redis:del(history_key)
+    -- Clear all data for this chat
+    local chat_messages_key = "chat:messages:" .. USER_ID .. ":" .. chat_id
+    local chat_artifacts_key = "chat:artifacts:" .. USER_ID .. ":" .. chat_id
+    local chat_meta_key = "chat:meta:" .. USER_ID .. ":" .. chat_id
+    local counter_in_key = "chat:counter:" .. USER_ID .. ":" .. chat_id .. ":in"
+    local counter_out_key = "chat:counter:" .. USER_ID .. ":" .. chat_id .. ":out"
+    
+    -- Get all message and artifact IDs to delete individual records
+    local message_ids = redis:lrange(chat_messages_key, 0, -1)
+    local artifact_ids = redis:lrange(chat_artifacts_key, 0, -1)
+    
+    -- Delete individual messages
+    if message_ids and type(message_ids) == "table" then
+        for _, message_id in ipairs(message_ids) do
+            local message_key = "message:" .. USER_ID .. ":" .. chat_id .. ":" .. message_id
+            redis:del(message_key)
+        end
+    end
+    
+    -- Delete individual artifacts
+    if artifact_ids and type(artifact_ids) == "table" then
+        for _, artifact_id in ipairs(artifact_ids) do
+            local artifact_key = "artifact:" .. USER_ID .. ":" .. chat_id .. ":" .. artifact_id
+            redis:del(artifact_key)
+        end
+    end
+    
+    -- Delete list keys and metadata
+    redis:del(chat_messages_key)
+    redis:del(chat_artifacts_key)
+    redis:del(chat_meta_key)
+    redis:del(counter_in_key)
+    redis:del(counter_out_key)
+    
+    redis_client.close(redis)
+    ngx.say(cjson.encode({success = true}))
+end
+
+-- Delete a specific chat and all its data
+function _M.handle_delete_chat()
+    if ngx.req.get_method() ~= "POST" then
+        ngx.status = 405
+        ngx.say(cjson.encode({error = "Method not allowed"}))
+        return
+    end
+    
+    ngx.header["Content-Type"] = "application/json"
+    
+    ngx.req.read_body()
+    local body = ngx.req.get_body_data()
+    
+    if not body then
+        ngx.status = 400
+        ngx.say(cjson.encode({error = "No request body"}))
+        return
+    end
+    
+    local ok, request_data = pcall(cjson.decode, body)
+    if not ok or not request_data.chat_id then
+        ngx.status = 400
+        ngx.say(cjson.encode({error = "Missing chat_id"}))
+        return
+    end
+    
+    local chat_id = request_data.chat_id
+    
+    local redis = redis_client.connect()
+    if not redis then
+        ngx.status = 500
+        ngx.say(cjson.encode({error = "Redis connection failed"}))
+        return
+    end
+    
+    -- Use same deletion logic as clear_chat
+    local chat_messages_key = "chat:messages:" .. USER_ID .. ":" .. chat_id
+    local chat_artifacts_key = "chat:artifacts:" .. USER_ID .. ":" .. chat_id
+    local chat_meta_key = "chat:meta:" .. USER_ID .. ":" .. chat_id
+    local counter_in_key = "chat:counter:" .. USER_ID .. ":" .. chat_id .. ":in"
+    local counter_out_key = "chat:counter:" .. USER_ID .. ":" .. chat_id .. ":out"
+    
+    local message_ids = redis:lrange(chat_messages_key, 0, -1)
+    local artifact_ids = redis:lrange(chat_artifacts_key, 0, -1)
+    
+    local deleted_items = 0
+    
+    -- Delete individual messages
+    if message_ids and type(message_ids) == "table" then
+        for _, message_id in ipairs(message_ids) do
+            local message_key = "message:" .. USER_ID .. ":" .. chat_id .. ":" .. message_id
+            deleted_items = deleted_items + redis:del(message_key)
+        end
+    end
+    
+    -- Delete individual artifacts
+    if artifact_ids and type(artifact_ids) == "table" then
+        for _, artifact_id in ipairs(artifact_ids) do
+            local artifact_key = "artifact:" .. USER_ID .. ":" .. chat_id .. ":" .. artifact_id
+            deleted_items = deleted_items + redis:del(artifact_key)
+        end
+    end
+    
+    -- Delete all chat keys
+    deleted_items = deleted_items + redis:del(chat_messages_key)
+    deleted_items = deleted_items + redis:del(chat_artifacts_key)
+    deleted_items = deleted_items + redis:del(chat_meta_key)
+    deleted_items = deleted_items + redis:del(counter_in_key)
+    deleted_items = deleted_items + redis:del(counter_out_key)
     
     redis_client.close(redis)
     
     ngx.say(cjson.encode({
         success = true,
-        deleted = result > 0
+        deleted_count = deleted_items
     }))
 end
 
@@ -260,26 +530,25 @@ function _M.handle_delete_all_chats()
         return
     end
     
-    -- Get all chat keys for this user
-    local pattern = "chat:history:" .. USER_ID .. ":*"
-    local keys = redis:keys(pattern)
-    
     local deleted_count = 0
     
-    if keys and type(keys) == "table" then
-        for _, key in ipairs(keys) do
-            local result = redis:del(key)
-            if result > 0 then
-                deleted_count = deleted_count + 1
+    -- Get all patterns for this user
+    local patterns = {
+        "message:" .. USER_ID .. ":*",
+        "artifact:" .. USER_ID .. ":*",
+        "chat:messages:" .. USER_ID .. ":*",
+        "chat:artifacts:" .. USER_ID .. ":*",
+        "chat:meta:" .. USER_ID .. ":*",
+        "chat:counter:" .. USER_ID .. ":*"
+    }
+    
+    for _, pattern in ipairs(patterns) do
+        local keys = redis:keys(pattern)
+        if keys and type(keys) == "table" then
+            for _, key in ipairs(keys) do
+                deleted_count = deleted_count + redis:del(key)
             end
         end
-    end
-    
-    -- Also delete the old format key for compatibility
-    local old_key = "chat:history:" .. USER_ID
-    local old_result = redis:del(old_key)
-    if old_result > 0 then
-        deleted_count = deleted_count + 1
     end
     
     redis_client.close(redis)
@@ -290,7 +559,7 @@ function _M.handle_delete_all_chats()
     }))
 end
 
--- Handle streaming chat with file support and multi-chat
+-- Handle streaming chat with proper Redis storage and artifact generation
 function _M.handle_chat_stream()
     if ngx.req.get_method() ~= "POST" then
         ngx.status = 405
@@ -319,6 +588,12 @@ function _M.handle_chat_stream()
     local files = request_data.files or {}
     local chat_id = request_data.chat_id
     
+    if not chat_id or chat_id == "" then
+        ngx.status = 400
+        ngx.say("Missing chat_id")
+        return
+    end
+    
     -- If no message and no files, return error
     if user_message == "" and #files == 0 then
         ngx.status = 400
@@ -334,19 +609,8 @@ function _M.handle_chat_stream()
         return
     end
     
-    -- Get existing conversation history for this specific chat
-    local history_key = get_chat_key(chat_id)
-    local existing_history = redis:get(history_key)
-    
-    local messages = {}
-    if existing_history and existing_history ~= ngx.null then
-        local ok, decoded = pcall(cjson.decode, existing_history)
-        if ok then
-            messages = decoded
-        end
-    end
-    
-    -- Prepare the complete user message with file context
+    -- Generate user message ID and save it
+    local user_message_id = generate_message_id(redis, chat_id, "in")
     local complete_message = user_message
     local file_context = format_files_for_context(files)
     
@@ -354,34 +618,17 @@ function _M.handle_chat_stream()
         complete_message = complete_message .. file_context
     end
     
-    -- Add user message to history
-    local user_message_entry = {
+    -- Save user message
+    save_message(redis, chat_id, user_message_id, "user", user_message, files, {})
+    
+    -- Get context for Ollama (last 10 messages)
+    local context_messages = get_chat_context(redis, chat_id, 10)
+    
+    -- Add current message with file context to context
+    table.insert(context_messages, {
         role = "user",
-        content = user_message,
-        files = files,
-        timestamp = ngx.time()
-    }
-    table.insert(messages, user_message_entry)
-    
-    -- Prepare context for Ollama (last 10 messages, but include file context in the actual content)
-    local context_messages = {}
-    local start_idx = math.max(1, #messages - 9)
-    
-    for i = start_idx, #messages do
-        local msg = messages[i]
-        local role = msg.role == "user" and "user" or "assistant"
-        local content = msg.content
-        
-        -- For the current user message, include file context
-        if i == #messages and msg.role == "user" and file_context ~= "" then
-            content = content .. file_context
-        end
-        
-        table.insert(context_messages, {
-            role = role,
-            content = content
-        })
-    end
+        content = complete_message
+    })
     
     -- Set headers for Server-Sent Events
     ngx.header["Content-Type"] = "text/event-stream"
@@ -420,6 +667,7 @@ function _M.handle_chat_stream()
         ngx.log(ngx.ERR, "Ollama request failed: ", err)
         ngx.say("data: " .. cjson.encode({error = "Failed to connect to AI model"}) .. "\n\n")
         ngx.flush()
+        redis_client.close(redis)
         return
     end
     
@@ -427,6 +675,7 @@ function _M.handle_chat_stream()
         ngx.log(ngx.ERR, "Ollama returned status: ", res.status)
         ngx.say("data: " .. cjson.encode({error = "AI model returned error: " .. res.status}) .. "\n\n")
         ngx.flush()
+        redis_client.close(redis)
         return
     end
     
@@ -442,8 +691,8 @@ function _M.handle_chat_stream()
     -- Process each line from Ollama
     for _, line in ipairs(lines) do
         if line and line ~= "" then
-            local ok, chunk_data = pcall(cjson.decode, line)
-            if ok and chunk_data.message and chunk_data.message.content then
+            local ok_chunk, chunk_data = pcall(cjson.decode, line)
+            if ok_chunk and chunk_data.message and chunk_data.message.content then
                 local content = chunk_data.message.content
                 full_response = full_response .. content
                 
@@ -462,16 +711,14 @@ function _M.handle_chat_stream()
     ngx.say("data: [DONE]\n\n")
     ngx.flush()
     
-    -- Save assistant response to history
-    table.insert(messages, {
-        role = "ai",
-        content = full_response,
-        timestamp = ngx.time()
-    })
+    -- Generate AI message ID and save response with artifacts
+    local ai_message_id = generate_message_id(redis, chat_id, "out")
     
-    -- Save updated history to Redis with TTL
-    redis:set(history_key, cjson.encode(messages))
-    redis:expire(history_key, 86400 * 30) -- Expire after 30 days
+    -- Extract and save code blocks as artifacts
+    local artifacts = extract_and_save_code_blocks(redis, chat_id, ai_message_id, full_response)
+    
+    -- Save AI message with artifact references
+    save_message(redis, chat_id, ai_message_id, "ai", full_response, {}, artifacts)
     
     redis_client.close(redis)
     httpc:close()

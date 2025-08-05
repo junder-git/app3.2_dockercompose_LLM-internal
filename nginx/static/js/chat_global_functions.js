@@ -1,4 +1,4 @@
-// Global functions for UI interactions
+// Global functions for UI interactions - Redis Backend
 
 // Initialize when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
@@ -12,70 +12,81 @@ function createNewChat() {
     }
 }
 
-function clearCurrentChat() {
+async function clearCurrentChat() {
     if (!window.chat || !window.chat.currentChatId) return;
     
     if (!confirm('Are you sure you want to clear this chat? This action cannot be undone.')) {
         return;
     }
     
-    const chat = window.chat.chats.get(window.chat.currentChatId);
-    if (chat) {
-        chat.messages = [];
-        chat.updatedAt = new Date();
+    try {
+        const success = await window.chat.clearCurrentChatArtifacts();
         
-        // Clear artifacts for this chat
-        window.chat.clearCurrentChatArtifacts();
-        
-        // Clear UI
-        const messagesContainer = document.getElementById('messages-content');
-        const welcomePrompt = document.getElementById('welcome-prompt');
-        
-        if (messagesContainer) {
-            messagesContainer.innerHTML = '';
+        if (success) {
+            // Clear UI
+            const messagesContainer = document.getElementById('messages-content');
+            const welcomePrompt = document.getElementById('welcome-prompt');
+            
+            if (messagesContainer) {
+                messagesContainer.innerHTML = '';
+            }
+            if (welcomePrompt) {
+                welcomePrompt.style.display = 'block';
+            }
+            
+            // Reload chat list to reflect changes
+            await window.chat.loadChatList();
+            window.chat.ui.updateCurrentChatTitle('New Chat');
+            
+            console.log('Current chat and artifacts cleared from Redis');
+        } else {
+            alert('Failed to clear chat. Please try again.');
         }
-        if (welcomePrompt) {
-            welcomePrompt.style.display = 'block';
-        }
-        
-        window.chat.ui.updateChatList();
-        window.chat.saveChatToStorage(chat);
-        window.chat.saveChatList();
-        
-        console.log('Current chat and artifacts cleared');
+    } catch (error) {
+        console.error('Error clearing chat:', error);
+        alert('An error occurred while clearing the chat.');
     }
 }
 
-function refreshChatList() {
+async function refreshChatList() {
     if (window.chat) {
-        window.chat.loadChatList();
-        window.chat.ui.updateChatList();
+        await window.chat.loadChatList();
     }
 }
 
-function deleteAllChats() {
+async function deleteAllChats() {
     if (!window.chat) return;
     
     if (!confirm('Are you sure you want to delete ALL chats? This action cannot be undone.')) {
         return;
     }
     
-    // Delete all chats from storage
-    window.chat.chats.forEach((chat, chatId) => {
-        window.chat.deleteChatFromStorage(chatId);
-    });
-    
-    // Clear chat list from localStorage
-    localStorage.removeItem('internal_chat_list');
-    
-    // Clear in-memory chats
-    window.chat.chats.clear();
-    window.chat.currentChatId = null;
-    
-    // Create a new chat
-    window.chat.createNewChat();
-    
-    console.log('All chats deleted');
+    try {
+        const response = await fetch('/api/chat/delete-all', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            
+            // Clear in-memory chats
+            window.chat.chats.clear();
+            window.chat.currentChatId = null;
+            
+            // Create a new chat
+            window.chat.createNewChat();
+            
+            console.log(`All chats deleted (${data.deleted_count} items removed from Redis)`);
+        } else {
+            alert('Failed to delete all chats. Please try again.');
+        }
+    } catch (error) {
+        console.error('Error deleting all chats:', error);
+        alert('An error occurred while deleting chats.');
+    }
 }
 
 // File upload functions
@@ -85,7 +96,7 @@ function clearAllFiles() {
     }
 }
 
-// Chat options functions
+// Chat options functions (unchanged)
 function renameChatConfirm() {
     if (!window.chat || !window.chat.selectedChatForOptions) return;
     
@@ -100,15 +111,19 @@ function renameChatConfirm() {
     window.chat.selectedChatForOptions = null;
 }
 
-function duplicateChat() {
+async function duplicateChat() {
     if (!window.chat || !window.chat.selectedChatForOptions) return;
     
-    window.chat.duplicateChat(window.chat.selectedChatForOptions);
+    const newChatId = await window.chat.duplicateChat(window.chat.selectedChatForOptions);
     window.chat.chatOptionsModal.hide();
     window.chat.selectedChatForOptions = null;
+    
+    if (newChatId) {
+        console.log('Chat duplicated:', newChatId);
+    }
 }
 
-function deleteChatConfirm() {
+async function deleteChatConfirm() {
     if (!window.chat || !window.chat.selectedChatForOptions) return;
     
     const chat = window.chat.chats.get(window.chat.selectedChatForOptions);
@@ -118,50 +133,109 @@ function deleteChatConfirm() {
         return;
     }
     
-    window.chat.deleteChat(window.chat.selectedChatForOptions);
+    await window.chat.deleteChat(window.chat.selectedChatForOptions);
     window.chat.chatOptionsModal.hide();
     window.chat.selectedChatForOptions = null;
 }
 
-// Artifact management functions
+// Artifact management functions (Redis-based)
 function showArtifactPanel() {
     if (window.artifactsPanel) {
         window.artifactsPanel.show();
     }
 }
 
-function refreshArtifactPanel() {
+async function refreshArtifactPanel() {
     if (window.artifactsPanel) {
-        window.artifactsPanel.refresh();
+        await window.artifactsPanel.refresh();
     }
 }
 
-function exportChatArtifacts() {
+async function exportChatArtifacts() {
     if (window.chat) {
-        window.chat.exportChatArtifacts();
+        await window.chat.exportChatArtifacts();
     }
 }
 
-function searchChatArtifacts(query, type = null) {
+async function searchChatArtifacts(query, type = null) {
     if (window.chat) {
-        return window.chat.searchArtifacts(query, type);
+        return await window.chat.searchArtifacts(query, type);
     }
     return [];
 }
 
-function getArtifactById(artifactId) {
+async function getArtifactById(artifactId) {
     if (window.chat) {
-        return window.chat.getArtifactReference(artifactId);
+        return await window.chat.getArtifactReference(artifactId);
     }
     return null;
 }
 
-function showArtifactInfo(artifactId) {
-    const artifact = getArtifactById(artifactId);
-    if (artifact) {
-        console.log('Artifact Info:', artifact);
-        alert(`Artifact: ${artifact.id}\nType: ${artifact.type}\nTimestamp: ${new Date(artifact.timestamp).toLocaleString()}\nContent Length: ${(artifact.content || artifact.code || '').length} characters`);
-    } else {
-        alert(`Artifact with ID "${artifactId}" not found.`);
+async function showArtifactInfo(artifactId) {
+    try {
+        const artifact = await getArtifactById(artifactId);
+        if (artifact) {
+            console.log('Artifact Info:', artifact);
+            const timestamp = new Date(artifact.timestamp * 1000).toLocaleString();
+            const contentLength = (artifact.content || artifact.code || '').length;
+            alert(`Artifact: ${artifact.id}\nType: ${artifact.type}\nTimestamp: ${timestamp}\nContent Length: ${contentLength} characters`);
+        } else {
+            alert(`Artifact with ID "${artifactId}" not found.`);
+        }
+    } catch (error) {
+        console.error('Error fetching artifact info:', error);
+        alert('Failed to fetch artifact information.');
     }
+}
+
+// Utility functions for Redis-based operations
+async function getChatStats() {
+    if (!window.chat || !window.chat.artifacts) return null;
+    
+    try {
+        return await window.chat.artifacts.getStats();
+    } catch (error) {
+        console.error('Error getting chat stats:', error);
+        return null;
+    }
+}
+
+async function getAllChatArtifacts() {
+    if (!window.chat || !window.chat.artifacts) return [];
+    
+    try {
+        return await window.chat.artifacts.getAllArtifacts();
+    } catch (error) {
+        console.error('Error getting all artifacts:', error);
+        return [];
+    }
+}
+
+// Debug functions for Redis inspection
+async function debugChatState() {
+    if (!window.chat) {
+        console.log('Chat system not initialized');
+        return;
+    }
+    
+    console.log('=== Chat System Debug Info ===');
+    console.log('Current Chat ID:', window.chat.currentChatId);
+    console.log('Local Cache Size:', window.chat.chats.size);
+    console.log('Local Chats:', Array.from(window.chat.chats.keys()));
+    
+    try {
+        const stats = await getChatStats();
+        console.log('Artifact Stats:', stats);
+        
+        const artifacts = await getAllChatArtifacts();
+        console.log('Current Chat Artifacts:', artifacts.length);
+        
+        if (artifacts.length > 0) {
+            console.log('Artifact IDs:', artifacts.map(a => a.id));
+        }
+    } catch (error) {
+        console.error('Error getting debug info:', error);
+    }
+    
+    console.log('=== End Debug Info ===');
 }

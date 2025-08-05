@@ -1,4 +1,4 @@
-// Artifact panel functionality
+// Artifact panel functionality - Redis Backend
 class ChatArtifactsPanel {
     constructor() {
         this.modal = null;
@@ -11,7 +11,7 @@ class ChatArtifactsPanel {
             this.modal = new bootstrap.Modal(document.getElementById('artifactPanelModal'));
             this.setupEventListeners();
         });
-        console.log('Chat Artifacts Panel initialized');
+        console.log('Chat Artifacts Panel initialized (Redis backend)');
     }
     
     setupEventListeners() {
@@ -29,66 +29,91 @@ class ChatArtifactsPanel {
     }
     
     // Show artifact panel
-    show() {
+    async show() {
         if (this.modal) {
-            this.refresh();
+            await this.refresh();
             this.modal.show();
         }
     }
     
-    // Refresh artifact panel data
-    refresh() {
+    // Refresh artifact panel data from Redis
+    async refresh() {
         if (!window.chat || !window.chat.artifacts) return;
         
-        this.updateArtifactStats();
-        this.displayArtifacts();
+        try {
+            await this.updateArtifactStats();
+            await this.displayArtifacts();
+        } catch (error) {
+            console.error('Error refreshing artifact panel:', error);
+        }
     }
     
-    // Update artifact statistics
-    updateArtifactStats() {
+    // Update artifact statistics from Redis
+    async updateArtifactStats() {
         if (!window.chat || !window.chat.artifacts) return;
         
-        const allArtifacts = window.chat.artifacts.getAllArtifacts();
-        const userMessages = allArtifacts.filter(a => a.type === 'in');
-        const aiMessages = allArtifacts.filter(a => a.type === 'out');
-        const codeBlocks = allArtifacts.filter(a => a.type === 'code_block');
-        
-        // Update stats display
-        const totalElement = document.getElementById('total-messages');
-        const userElement = document.getElementById('user-messages');
-        const aiElement = document.getElementById('ai-messages');
-        const codeElement = document.getElementById('code-blocks');
-        
-        if (totalElement) totalElement.textContent = userMessages.length + aiMessages.length;
-        if (userElement) userElement.textContent = userMessages.length;
-        if (aiElement) aiElement.textContent = aiMessages.length;
-        if (codeElement) codeElement.textContent = codeBlocks.length;
+        try {
+            const stats = await window.chat.artifacts.getStats();
+            
+            // Update stats display
+            const totalElement = document.getElementById('total-messages');
+            const userElement = document.getElementById('user-messages');
+            const aiElement = document.getElementById('ai-messages');
+            const codeElement = document.getElementById('code-blocks');
+            
+            if (totalElement) totalElement.textContent = stats.messages || 0;
+            if (userElement) userElement.textContent = stats.userMessages || 0;
+            if (aiElement) aiElement.textContent = stats.aiMessages || 0;
+            if (codeElement) codeElement.textContent = stats.codeBlocks || 0;
+        } catch (error) {
+            console.error('Error updating artifact stats:', error);
+            
+            // Reset to 0 on error
+            const elements = ['total-messages', 'user-messages', 'ai-messages', 'code-blocks'];
+            elements.forEach(id => {
+                const element = document.getElementById(id);
+                if (element) element.textContent = '0';
+            });
+        }
     }
     
-    // Display artifacts in the panel
-    displayArtifacts() {
+    // Display artifacts in the panel from Redis
+    async displayArtifacts() {
         const artifactList = document.getElementById('artifact-list');
         if (!artifactList || !window.chat || !window.chat.artifacts) return;
         
-        const allArtifacts = window.chat.artifacts.getAllArtifacts()
-            .sort((a, b) => a.timestamp - b.timestamp); // Sort by creation time
-        
-        if (allArtifacts.length === 0) {
+        try {
+            const allArtifacts = await window.chat.artifacts.getAllArtifacts();
+            
+            if (allArtifacts.length === 0) {
+                artifactList.innerHTML = `
+                    <div class="text-center text-muted p-3">
+                        <i class="bi bi-inbox"></i>
+                        <p class="mb-0 mt-2">No artifacts found</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            // Sort by creation time
+            allArtifacts.sort((a, b) => a.timestamp - b.timestamp);
+            
+            artifactList.innerHTML = '';
+            
+            allArtifacts.forEach(artifact => {
+                const artifactElement = this.createArtifactListItem(artifact);
+                artifactList.appendChild(artifactElement);
+            });
+        } catch (error) {
+            console.error('Error displaying artifacts:', error);
             artifactList.innerHTML = `
-                <div class="text-center text-muted p-3">
-                    <i class="bi bi-inbox"></i>
-                    <p class="mb-0 mt-2">No artifacts found</p>
+                <div class="text-center text-danger p-3">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    <p class="mb-0 mt-2">Error loading artifacts</p>
+                    <small>${error.message}</small>
                 </div>
             `;
-            return;
         }
-        
-        artifactList.innerHTML = '';
-        
-        allArtifacts.forEach(artifact => {
-            const artifactElement = this.createArtifactListItem(artifact);
-            artifactList.appendChild(artifactElement);
-        });
     }
     
     // Create artifact list item element
@@ -100,7 +125,7 @@ class ChatArtifactsPanel {
         
         const typeIcon = this.getArtifactTypeIcon(artifact.type);
         const typeLabel = this.getArtifactTypeLabel(artifact.type);
-        const timestamp = new Date(artifact.timestamp).toLocaleString();
+        const timestamp = new Date(artifact.timestamp * 1000).toLocaleString();
         
         let content = '';
         let preview = '';
@@ -114,7 +139,7 @@ class ChatArtifactsPanel {
         }
         
         const languageInfo = artifact.language ? ` (${artifact.language})` : '';
-        const parentInfo = artifact.parentId ? ` [Parent: ${artifact.parentId}]` : '';
+        const parentInfo = artifact.parent_id ? ` [Parent: ${artifact.parent_id}]` : '';
         
         item.innerHTML = `
             <div class="d-flex justify-content-between align-items-start mb-2">
@@ -208,20 +233,26 @@ class ChatArtifactsPanel {
     }
     
     // Copy artifact content to clipboard
-    copyArtifactContent(artifactId) {
-        const artifact = window.chat?.getArtifactReference(artifactId);
-        if (artifact) {
-            const content = artifact.code || artifact.content || '';
-            navigator.clipboard.writeText(content).then(() => {
+    async copyArtifactContent(artifactId) {
+        try {
+            const artifact = await window.chat?.getArtifactReference(artifactId);
+            if (artifact) {
+                const content = artifact.code || artifact.content || '';
+                await navigator.clipboard.writeText(content);
+                
                 if (window.chat && window.chat.ui) {
                     window.chat.ui.showToast('Artifact content copied!', 'success');
                 }
-            }).catch(err => {
-                console.error('Failed to copy artifact content:', err);
+            } else {
                 if (window.chat && window.chat.ui) {
-                    window.chat.ui.showToast('Failed to copy content', 'error');
+                    window.chat.ui.showToast('Artifact not found', 'warning');
                 }
-            });
+            }
+        } catch (error) {
+            console.error('Failed to copy artifact content:', error);
+            if (window.chat && window.chat.ui) {
+                window.chat.ui.showToast('Failed to copy content', 'error');
+            }
         }
     }
     
