@@ -149,3 +149,61 @@
         opacity: 1;
     }
 }
+
+/* Placeholder message styles - ADD TO chat_messages.css */
+
+/* Placeholder messages styling */
+.placeholder-message {
+    opacity: 0.8;
+    transition: opacity 0.3s ease;
+    border-left: 3px solid #007bff;
+    background: rgba(13, 110, 253, 0.05);
+}
+
+.placeholder-message .message-header {
+    opacity: 0.7;
+}
+
+.placeholder-message .message-content {
+    border-radius: 8px;
+    background: rgba(13, 110, 253, 0.05);
+}
+
+.placeholder-message.streaming .message-content:after {
+    content: "▋";
+    animation: blink 1s infinite;
+    color: #007bff;
+    font-weight: bold;
+    margin-left: 2px;
+}
+
+@keyframes blink {
+    0%, 50% { opacity: 1; }
+    51%, 100% { opacity: 0; }
+}
+
+/* Fade out animation when removing placeholders */
+.placeholder-message.removing {
+    opacity: 0;
+    transform: scale(0.95);
+    transition: all 0.3s ease;
+}
+
+/* Distinguish placeholder from real messages */
+.placeholder-message::before {
+    content: "💭";
+    position: absolute;
+    left: -25px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 14px;
+    opacity: 0.5;
+}
+
+/* Mobile adjustments for placeholders */
+@media (max-width: 768px) {
+    .placeholder-message::before {
+        left: -20px;
+        font-size: 12px;
+    }
+}

@@ -1,4 +1,4 @@
-// Artifact panel functionality - Redis Backend with admin/jai format
+// Artifact panel functionality - Redis Backend with admin/jai format - FIXED VERSION
 class ChatArtifactsPanel {
     constructor() {
         this.modal = null;
@@ -48,18 +48,36 @@ class ChatArtifactsPanel {
         }
     }
     
-    // Update artifact statistics from Redis
+    // FIXED: Update artifact statistics from Redis
     async updateArtifactStats() {
         if (!window.chat || !window.chat.artifacts) return;
         
         try {
             const allArtifacts = await window.chat.artifacts.getAllArtifacts();
             
-            // Count artifacts properly
-            const messageArtifacts = allArtifacts.filter(a => !a.id.includes('_code('));
-            const codeBlockArtifacts = allArtifacts.filter(a => a.id.includes('_code('));
-            const adminMessages = allArtifacts.filter(a => a.type === 'admin' && !a.id.includes('_code('));
-            const jaiMessages = allArtifacts.filter(a => a.type === 'jai' && !a.id.includes('_code('));
+            console.log('Raw artifacts from server:', allArtifacts); // Debug log
+            
+            // Count artifacts by ID pattern since server might not set type correctly
+            const messageArtifacts = allArtifacts.filter(a => {
+                // Check if it's a code block by ID pattern
+                const isCodeBlock = a.id && a.id.includes('_code(');
+                return !isCodeBlock;
+            });
+            
+            const codeBlockArtifacts = allArtifacts.filter(a => {
+                // Check if it's a code block by ID pattern
+                return a.id && a.id.includes('_code(');
+            });
+            
+            const adminMessages = allArtifacts.filter(a => {
+                const isCodeBlock = a.id && a.id.includes('_code(');
+                return !isCodeBlock && (a.type === 'admin' || (a.id && a.id.startsWith('admin(')));
+            });
+            
+            const jaiMessages = allArtifacts.filter(a => {
+                const isCodeBlock = a.id && a.id.includes('_code(');
+                return !isCodeBlock && (a.type === 'jai' || (a.id && a.id.startsWith('jai(')));
+            });
             
             const stats = {
                 messages: messageArtifacts.length,
@@ -67,6 +85,9 @@ class ChatArtifactsPanel {
                 jaiMessages: jaiMessages.length,
                 codeBlocks: codeBlockArtifacts.length
             };
+            
+            console.log('Calculated stats:', stats); // Debug log
+            console.log('Code blocks found:', codeBlockArtifacts.map(a => a.id)); // Debug log
             
             // Update stats display
             const totalElement = document.getElementById('total-messages');
@@ -78,6 +99,7 @@ class ChatArtifactsPanel {
             if (userElement) userElement.textContent = stats.adminMessages || 0;
             if (aiElement) aiElement.textContent = stats.jaiMessages || 0;
             if (codeElement) codeElement.textContent = stats.codeBlocks || 0;
+            
         } catch (error) {
             console.error('Error updating artifact stats:', error);
             
@@ -90,13 +112,30 @@ class ChatArtifactsPanel {
         }
     }
     
-    // Display artifacts in the panel from Redis
+    // FIXED: Display artifacts in the panel from Redis with enhanced debugging
     async displayArtifacts() {
         const artifactList = document.getElementById('artifact-list');
         if (!artifactList || !window.chat || !window.chat.artifacts) return;
         
         try {
             const allArtifacts = await window.chat.artifacts.getAllArtifacts();
+            
+            // Enhanced debug logging
+            console.log('=== ARTIFACTS DEBUG ===');
+            console.log('Total artifacts received:', allArtifacts.length);
+            console.log('All artifacts:', allArtifacts);
+            
+            // Analyze artifacts
+            const codeBlocks = allArtifacts.filter(a => a.id && a.id.includes('_code('));
+            const messages = allArtifacts.filter(a => !a.id || !a.id.includes('_code('));
+            
+            console.log('Code blocks found:', codeBlocks.length);
+            console.log('Code block IDs:', codeBlocks.map(a => a.id));
+            console.log('Code block details:', codeBlocks);
+            
+            console.log('Message artifacts found:', messages.length);
+            console.log('Message IDs:', messages.map(a => a.id));
+            console.log('=== END DEBUG ===');
             
             if (allArtifacts.length === 0) {
                 artifactList.innerHTML = `
@@ -113,10 +152,15 @@ class ChatArtifactsPanel {
             
             artifactList.innerHTML = '';
             
-            allArtifacts.forEach(artifact => {
+            allArtifacts.forEach((artifact, index) => {
+                console.log(`Creating item ${index + 1}:`, artifact.id, artifact.type);
                 const artifactElement = this.createArtifactListItem(artifact);
                 artifactList.appendChild(artifactElement);
             });
+            
+            // Show summary
+            console.log(`Rendered ${allArtifacts.length} artifacts in panel`);
+            
         } catch (error) {
             console.error('Error displaying artifacts:', error);
             artifactList.innerHTML = `
@@ -129,15 +173,40 @@ class ChatArtifactsPanel {
         }
     }
     
-    // Create artifact list item element
+    // FIXED: Create artifact list item element with robust detection and debug logging
     createArtifactListItem(artifact) {
         const item = document.createElement('div');
         item.className = 'artifact-item border rounded p-3 mb-2';
         item.dataset.artifactId = artifact.id;
         
-        // FIXED: Determine if this is a code block by ID format, not by type field
-        const isCodeBlock = artifact.id.includes('_code(');
-        const displayType = isCodeBlock ? 'code_block' : artifact.type;
+        // ROBUST: Determine if this is a code block by multiple methods
+        const isCodeBlockById = artifact.id && artifact.id.includes('_code(');
+        const isCodeBlockByType = artifact.type === 'code_block';
+        const hasCode = artifact.code && artifact.code.trim() !== '';
+        
+        const isCodeBlock = isCodeBlockById || isCodeBlockByType || hasCode;
+        
+        // Determine display type
+        let displayType;
+        if (isCodeBlock) {
+            displayType = 'code_block';
+        } else if (artifact.id && artifact.id.startsWith('admin(')) {
+            displayType = 'admin';
+        } else if (artifact.id && artifact.id.startsWith('jai(')) {
+            displayType = 'jai';
+        } else {
+            displayType = artifact.type || 'unknown';
+        }
+        
+        // Debug logging
+        console.log('Artifact item creation:', {
+            id: artifact.id,
+            originalType: artifact.type,
+            displayType: displayType,
+            isCodeBlock: isCodeBlock,
+            hasCode: hasCode,
+            codeLength: artifact.code ? artifact.code.length : 0
+        });
         
         item.dataset.artifactType = displayType;
         
@@ -149,9 +218,11 @@ class ChatArtifactsPanel {
         let preview = '';
         
         if (isCodeBlock) {
+            // For code blocks, prefer 'code' field, fallback to 'content'
             content = artifact.code || artifact.content || '';
             preview = content.length > 100 ? content.substring(0, 100) + '...' : content;
         } else {
+            // For messages, use 'content' field
             content = artifact.content || '';
             preview = content.length > 150 ? content.substring(0, 150) + '...' : content;
         }
@@ -184,6 +255,7 @@ class ChatArtifactsPanel {
                 <div class="mt-2">
                     <code class="artifact-content-preview">${this.escapeHtml(preview)}</code>
                 </div>
+                ${isCodeBlock ? `<div class="mt-1"><small class="text-success">📝 Code Block (${content.length} chars)</small></div>` : ''}
             </div>
         `;
         

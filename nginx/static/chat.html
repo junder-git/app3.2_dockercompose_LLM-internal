@@ -165,7 +165,7 @@
         </div>
     </div>
 
-    <!-- Artifact Panel Modal -->
+    <!-- FIXED: Artifact Panel Modal - Removed duplicate search bar -->
     <div class="modal fade" id="artifactPanelModal" tabindex="-1">
         <div class="modal-dialog modal-xl">
             <div class="modal-content">
@@ -176,33 +176,29 @@
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
-                    <!-- Search and filters -->
-                    <div class="row mb-3">
-                        <div class="col-md-6">
-                            <input type="text" class="form-control" id="artifact-search" placeholder="Search artifacts...">
-                        </div>
-                        <!-- Updated artifact type filter in the modal -->
-                        <div class="artifacts-panel-filters mb-3">
-                            <div class="row g-3">
-                                <div class="col-md-8">
-                                    <div class="input-group">
-                                        <span class="input-group-text">
-                                            <i class="bi bi-search"></i>
-                                        </span>
-                                        <input type="text" id="artifact-search" class="form-control" placeholder="Search artifacts by ID or content...">
-                                    </div>
-                                </div>
-                                <div class="col-md-4">
-                                    <select id="artifact-type-filter" class="form-select">
-                                        <option value="">All Types</option>
-                                        <option value="admin">Admin Messages</option>
-                                        <option value="jai">AI Messages</option>
-                                        <option value="code_block">Code Blocks</option>
-                                    </select>
+                    <!-- Single search and filter section -->
+                    <div class="artifacts-panel-filters mb-3">
+                        <div class="row g-3">
+                            <div class="col-md-8">
+                                <div class="input-group">
+                                    <span class="input-group-text">
+                                        <i class="bi bi-search"></i>
+                                    </span>
+                                    <input type="text" id="artifact-search" class="form-control" placeholder="Search artifacts by ID or content...">
                                 </div>
                             </div>
+                            <div class="col-md-4">
+                                <select id="artifact-type-filter" class="form-select">
+                                    <option value="">All Types</option>
+                                    <option value="admin">Admin Messages</option>
+                                    <option value="jai">AI Messages</option>
+                                    <option value="code_block">Code Blocks</option>
+                                </select>
+                            </div>
                         </div>
-                    <!-- Updated stats cards -->
+                    </div>
+
+                    <!-- Stats cards -->
                     <div class="row mb-3">
                         <div class="col-md-3">
                             <div class="card text-center">
@@ -237,6 +233,7 @@
                             </div>
                         </div>
                     </div>
+
                     <!-- Artifact list -->
                     <div class="artifact-list" id="artifact-list" style="max-height: 400px; overflow-y: auto;">
                         <div class="text-center text-muted p-3">
