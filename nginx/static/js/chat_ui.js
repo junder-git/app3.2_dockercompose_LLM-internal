@@ -1,4 +1,4 @@
-// UI functionality and visual elements - Updated for chat(n) format
+// UI functionality and visual elements - Updated for chat(n) format with placeholders
 class ChatUI {
     constructor(chatInstance) {
         this.chatInstance = chatInstance;
@@ -348,21 +348,170 @@ class ChatUI {
             toastElement.remove();
         });
     }
-    // This method now assumes messages exist and are valid
+
+    // PLACEHOLDER MESSAGE METHODS
+    // Create temporary placeholder messages for immediate UX feedback
+    addPlaceholderUserMessage(content, files = []) {
+        const messagesContainer = document.getElementById('messages-content');
+        if (!messagesContainer) return null;
+        
+        const messageDiv = document.createElement('div');
+        messageDiv.className = 'message message-user placeholder-message';
+        messageDiv.dataset.placeholder = 'true';
+        
+        const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        
+        messageDiv.innerHTML = `
+            <div class="message-header">
+                <div class="message-role">You</div>
+                <div class="message-time">${timestamp}</div>
+            </div>
+            <div class="message-content">${this.escapeHtml(content)}</div>
+        `;
+        
+        // Add files if any
+        if (files && files.length > 0) {
+            const filesDiv = document.createElement('div');
+            filesDiv.className = 'message-files';
+            
+            files.forEach(file => {
+                const fileItem = document.createElement('div');
+                fileItem.className = 'message-file-item';
+                
+                const icon = this.chatInstance?.fileUpload?.getFileIcon ? 
+                    this.chatInstance.fileUpload.getFileIcon(file.type) : 'bi-file-earmark';
+                const size = this.chatInstance?.fileUpload?.formatFileSize ? 
+                    this.chatInstance.fileUpload.formatFileSize(file.size) : 
+                    this.formatFileSize(file.size);
+                
+                fileItem.innerHTML = `
+                    <i class="bi ${icon}"></i>
+                    <span>${this.escapeHtml(file.name)}</span>
+                    <small>(${size})</small>
+                `;
+                
+                filesDiv.appendChild(fileItem);
+            });
+            
+            messageDiv.insertBefore(filesDiv, messageDiv.querySelector('.message-content'));
+        }
+        
+        messagesContainer.appendChild(messageDiv);
+        this.scrollToBottom();
+        
+        return messageDiv;
+    }
+
+    // Create streaming placeholder for assistant response
+    addPlaceholderAssistantMessage() {
+        const messagesContainer = document.getElementById('messages-content');
+        if (!messagesContainer) return null;
+        
+        const messageDiv = document.createElement('div');
+        messageDiv.className = 'message message-assistant placeholder-message streaming';
+        messageDiv.dataset.placeholder = 'true';
+        
+        const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        
+        messageDiv.innerHTML = `
+            <div class="message-header">
+                <div class="message-role">JAI</div>
+                <div class="message-time">${timestamp}</div>
+            </div>
+            <div class="message-content"></div>
+        `;
+        
+        messagesContainer.appendChild(messageDiv);
+        this.scrollToBottom();
+        
+        return messageDiv;
+    }
+
+    // Update streaming content in placeholder
+    updatePlaceholderStreaming(content) {
+        const streamingMessage = document.querySelector('.placeholder-message.streaming');
+        
+        if (streamingMessage) {
+            const contentDiv = streamingMessage.querySelector('.message-content');
+            if (contentDiv && content) {
+                // Update content with markdown rendering
+                if (window.marked) {
+                    contentDiv.innerHTML = marked.parse(content);
+                } else {
+                    contentDiv.textContent = content;
+                }
+                
+                // Enhance code blocks
+                this.enhanceCodeBlocks(contentDiv, content);
+                
+                // Scroll to keep content visible
+                this.scrollToBottom();
+            }
+        }
+    }
+
+    // Remove all placeholder messages
+    removePlaceholderMessages() {
+        const placeholders = document.querySelectorAll('.placeholder-message');
+        placeholders.forEach(placeholder => {
+            placeholder.remove();
+        });
+    }
+
+    // Modified updateStreamingContent to work with placeholders
+    updateStreamingContent(content) {
+        // Try placeholder first, fallback to old method
+        const placeholderMessage = document.querySelector('.placeholder-message.streaming');
+        
+        if (placeholderMessage) {
+            this.updatePlaceholderStreaming(content);
+            return;
+        }
+        
+        // Fallback to original method if no placeholder
+        const messagesContainer = document.getElementById('messages-content');
+        if (!messagesContainer) return;
+        
+        let streamingMessage = messagesContainer.querySelector('.message.streaming:not(.placeholder-message)');
+        
+        if (!streamingMessage && content) {
+            streamingMessage = this.addMessage('assistant', '', true);
+            streamingMessage.classList.add('streaming');
+        }
+        
+        if (streamingMessage && content) {
+            const contentDiv = streamingMessage.querySelector('.message-content');
+            if (contentDiv) {
+                if (window.marked) {
+                    contentDiv.innerHTML = marked.parse(content);
+                } else {
+                    contentDiv.textContent = content;
+                }
+                
+                this.enhanceCodeBlocks(contentDiv, content);
+                this.scrollToBottom();
+            }
+        }
+    }
+
+    // FIXED renderChatMessages - Remove placeholders first and fix ID handling
     renderChatMessages(result, artifacts) {
         const messagesContainer = document.getElementById('messages-content');
         const welcomePrompt = document.getElementById('welcome-prompt');
         
         if (!messagesContainer) return;
         
-        // Clear current messages and hide welcome prompt
+        // Remove all placeholder messages first
+        this.removePlaceholderMessages();
+        
+        // Clear and render real messages
         messagesContainer.innerHTML = '';
         if (welcomePrompt) {
             welcomePrompt.style.display = 'none';
         }
         
-        const messages = result.messages; // We know this exists and has length > 0
-        console.log(`Rendering ${messages.length} messages for chat`);
+        const messages = result.messages;
+        console.log(`Rendering ${messages.length} real messages for chat`);
         
         // Update chat title from first user message
         const firstUserMessage = messages.find(msg => msg.role === 'user');
@@ -375,9 +524,15 @@ class ChatUI {
         
         // Load messages and process with artifacts
         for (const msg of messages) {
-            const messageElement = this.addMessage(msg.id, msg.content);           
+            // FIXED: Use msg.role for sender, not msg.id
+            const sender = msg.role === 'user' ? 'user' : 'assistant';
+            const messageElement = this.addMessage(sender, msg.content, false, msg.files || []);
+            
             if (messageElement && msg.id) {
-                // Determine artifact type from message ID format
+                // Set the message ID as data attribute for artifacts
+                messageElement.dataset.messageId = msg.id;
+                
+                // Determine artifact type from message ID format or role
                 let messageType;
                 if (msg.id.startsWith('admin(')) {
                     messageType = 'admin';
@@ -487,53 +642,34 @@ class ChatUI {
         URL.revokeObjectURL(url);
     }
 
-    // Update streaming content
-    updateStreamingContent(content) {
+    // MAIN addMessage method - for real messages from Redis
+    addMessage(sender, content, isStreaming = false, files = []) {
         const messagesContainer = document.getElementById('messages-content');
-        if (!messagesContainer) return;
+        if (!messagesContainer) return null;
         
-        let streamingMessage = messagesContainer.querySelector('.message.streaming');
-        
-        if (!streamingMessage && content) {
-            // Create new streaming message
-            streamingMessage = this.addMessage('assistant', '', true);
-            streamingMessage.classList.add('streaming');
-        }
-        
-        if (streamingMessage && content) {
-            const contentDiv = streamingMessage.querySelector('.message-content');
-            if (contentDiv) {
-                // Update content with markdown rendering
-                if (window.marked) {
-                    contentDiv.innerHTML = marked.parse(content);
-                } else {
-                    contentDiv.textContent = content;
-                }
-                
-                // Enhance code blocks
-                this.enhanceCodeBlocks(contentDiv, content);
-                
-                // Scroll to keep content visible
-                this.scrollToBottom();
-            }
-        }
-    }
-
-    // Message handling methods
-    addMessage(sender, content, isStreaming = false, files = []) {        
+        // Create main message div
         const messageDiv = document.createElement('div');
         messageDiv.className = `message message-${sender}`;
+        
+        // Set role label
         const roleLabel = sender === 'user' ? 'You' : sender === 'assistant' ? 'JAI' : 'System';
+        
+        // Create timestamp
+        const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        
+        // Build message structure
         messageDiv.innerHTML = `
             <div class="message-header">
                 <div class="message-role">${roleLabel}</div>
-                <div class="message-time">${Date.now()}</div>
+                <div class="message-time">${timestamp}</div>
             </div>
             <div class="message-content"></div>
-        `; 
-        const contentDiv = document.getElementById('messages-content');
-        if (!contentDiv) return null      
-        // Files (for user messages)
+        `;
+        
+        // Get the content div after creating the structure
+        const contentDiv = messageDiv.querySelector('.message-content');
+        
+        // Handle files (for user messages)
         if (files && files.length > 0) {
             const filesDiv = document.createElement('div');
             filesDiv.className = 'message-files';
@@ -542,57 +678,58 @@ class ChatUI {
                 const fileItem = document.createElement('div');
                 fileItem.className = 'message-file-item';
                 
-                const icon = this.fileUpload.getFileIcon(file.type);
-                const size = this.fileUpload.formatFileSize(file.size);
+                // Use proper file upload methods if available
+                const icon = this.chatInstance?.fileUpload?.getFileIcon ? 
+                    this.chatInstance.fileUpload.getFileIcon(file.type) : 'bi-file-earmark';
+                const size = this.chatInstance?.fileUpload?.formatFileSize ? 
+                    this.chatInstance.fileUpload.formatFileSize(file.size) : 
+                    this.formatFileSize(file.size);
                 
                 fileItem.innerHTML = `
                     <i class="bi ${icon}"></i>
-                    <span>${file.name}</span>
+                    <span>${this.escapeHtml(file.name)}</span>
                     <small>(${size})</small>
                 `;
                 
                 filesDiv.appendChild(fileItem);
             });
-            messageDiv.appendChild(filesDiv);
-        }        
-        // Content
-        if (sender === 'user') {
-            contentDiv.innerHTML = window.marked ? marked.parse(content) : content;
-        } else if (isStreaming) {
-            const streamDiv = document.createElement('div');
-            streamDiv.className = 'streaming-content';
-            contentDiv.appendChild(streamDiv);
-        } else {
-            contentDiv.innerHTML = window.marked ? marked.parse(content) : content;
-            this.enhanceCodeBlocks(contentDiv, content);
+            
+            // Insert files div before content div
+            messageDiv.insertBefore(filesDiv, contentDiv);
         }
         
-        // Process with artifacts system if not streaming
-        if (!isStreaming && this.chatInstance.currentChatId) {
-            const messageType = sender === 'user' ? 'in' : 'out';
-            this.chatInstance.artifacts.processMessageElement(messageDiv, messageType, content, files);
-            
-            // Save message to current chat
-            const chat = this.chatInstance.chats.get(this.chatInstance.currentChatId);
-            if (chat) {
-                chat.messages.push({
-                    role: sender === 'user' ? 'user' : 'ai',
-                    content: content,
-                    files: files || [],
-                    timestamp: Date.now()
-                });
-                
-                chat.updatedAt = new Date();
-                
-                // Update chat title if this is the first user message
-                if (sender === 'user' && chat.messages.filter(m => m.role === 'user').length === 1) {
-                    const newTitle = content.length > 30 ? content.substring(0, 30) + '...' : content;
-                    chat.title = newTitle;
-                    this.updateCurrentChatTitle(newTitle);
-                }
-                this.updateChatList();
+        // Handle content based on message type and streaming state
+        if (isStreaming) {
+            // For streaming messages, start with empty content
+            contentDiv.innerHTML = '';
+            contentDiv.classList.add('streaming');
+        } else {
+            // For completed messages, render content
+            if (sender === 'user') {
+                // User messages: render as markdown but simpler
+                contentDiv.innerHTML = window.marked ? marked.parse(content) : this.escapeHtml(content);
+            } else {
+                // Assistant/system messages: full markdown with enhancements
+                contentDiv.innerHTML = window.marked ? marked.parse(content) : this.escapeHtml(content);
+                this.enhanceCodeBlocks(contentDiv, content);
             }
         }
-        return messageDiv
+        
+        // Add to messages container
+        messagesContainer.appendChild(messageDiv);
+        
+        // Auto-scroll to bottom
+        this.scrollToBottom();
+        
+        return messageDiv;
+    }
+
+    // Helper method for file size formatting if not available elsewhere
+    formatFileSize(bytes) {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     }
 }

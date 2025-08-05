@@ -1,4 +1,4 @@
-// Chat Core Module - Thin orchestrator that delegates to specialized modules
+// Chat Core Module - Updated with new artifacts button functionality
 class InternalChat {
     constructor() {
         // State - minimal, just coordination
@@ -77,6 +77,18 @@ class InternalChat {
             chatSearch.addEventListener('input', (e) => this.ui.searchChats(e.target.value, this.chats));
         }
         
+        // Artifacts panel button (existing small button)
+        const artifactsButton = document.getElementById('artifacts-button');
+        if (artifactsButton) {
+            artifactsButton.addEventListener('click', () => this.openArtifactsPanel());
+        }
+        
+        // NEW: Code & AI Artifacts button (larger button with pre-selected filters)
+        const codeAiArtifactsButton = document.getElementById('code-ai-artifacts-button');
+        if (codeAiArtifactsButton) {
+            codeAiArtifactsButton.addEventListener('click', () => this.openCodeAiArtifactsPanel());
+        }
+        
         // Initialize chat options modal
         this.chatOptionsModal = new bootstrap.Modal(document.getElementById('chatOptionsModal'));
     }
@@ -93,14 +105,14 @@ class InternalChat {
     }
     
     setupOllamaCallbacks() {
-        // Set up streaming callback - delegate to UI for updates
+        // Set up streaming callback - use placeholder streaming update
         this.ollama.setChunkCallback((data) => {
             // Update chat ID if provided
             if (data.chatId && data.chatId !== this.currentChatId) {
                 this.setCurrentChatId(data.chatId);
             }
             
-            // Delegate to UI for streaming updates
+            // Use placeholder streaming update
             this.ui.updateStreamingContent(data.content);
         });
     }
@@ -179,50 +191,56 @@ class InternalChat {
         return result.success;
     }
     
-    // Message Handling - delegate to Ollama
+    // Message Handling with Placeholders
     async sendMessage() {
         const input = document.getElementById('chat-input');
         if (!input) return;
         const message = input.value.trim();
         if (!message && this.fileUpload.attachedFiles.length === 0) return;
         if (this.isTyping) return;
-        
+
         // Prepare message - delegate to Ollama for formatting
         const { messageContent, filesToSend } = this.ollama.prepareMessage(message, this.fileUpload.attachedFiles);
-        // Add user message to UI
-        this.ui.addMessage('user', messageContent, false, filesToSend);
         
+        // Add placeholder user message for immediate feedback
+        this.ui.addPlaceholderUserMessage(messageContent, filesToSend);
+        
+        // Add placeholder assistant message for streaming
+        this.ui.addPlaceholderAssistantMessage();
+
         // Clear input and files
         input.value = '';
         this.fileUpload.clearAllFiles();
         this.ui.updateCharCount();
         this.ui.autoResizeTextarea();
         this.ui.hideWelcomePrompt();
-        
+
         // Set typing state
         this.setTypingState(true);
-        
+
         try {
             // Send to Ollama - it handles streaming and callbacks
             const stream = await this.ollama.streamMessage(message, filesToSend, this.currentChatId);
-            
+
             // Handle response - delegate to UI
             if (stream.chatId && stream.chatId !== this.currentChatId) {
                 this.setCurrentChatId(stream.chatId);
                 this.redis.addNewChatToCache(stream.chatId, message, this.chats);
                 this.ui.updateChatList(this.chats);
             }
-            
+
             if (stream.content) {
-                //this.ui.addMessage('assistant', stream.content, false);
-                this.loadChatMessages(stream.chatId)
+                // Load real messages (this will remove placeholders and show real messages)
+                this.loadChatMessages(stream.chatId);
                 this.ui.updateCurrentChatTitle(this.ollama.generateTitle(message));
             }
-            
+
         } catch (error) {
-            // Delegate error handling to Ollama and UI
+            // Remove placeholders and show error
+            this.ui.removePlaceholderMessages();
+            
             const errorInfo = this.ollama.classifyError(error);
-            this.ui.addMessage('system', `Error: ${errorInfo.userFriendly}`, true);
+            this.ui.addMessage('system', `Error: ${errorInfo.userFriendly}`, false);
             this.ui.showToast(errorInfo.userFriendly, 'error');
         } finally {
             this.setTypingState(false);
@@ -257,15 +275,37 @@ class InternalChat {
         return await this.artifacts.searchArtifacts(query, type);
     }
     
-    async exportChatArtifacts() {
-        try {
-            const exportData = await this.artifacts.exportArtifacts();
-            this.ui.downloadFile(exportData, `chat-${this.currentChatId}-artifacts.json`, 'application/json');
-            this.ui.showToast('Artifacts exported successfully', 'success');
-        } catch (error) {
-            this.ui.showToast('Failed to export artifacts', 'error');
+    // NEW: Open artifacts panel with default filters (small button)
+    openArtifactsPanel() {
+        // Open artifacts panel with no pre-selected filters
+        if (this.artifacts && this.artifacts.openPanel) {
+            this.artifacts.openPanel();
+        } else {
+            this.ui.showToast('Artifacts panel not available', 'warning');
         }
     }
+    
+    // NEW: Open artifacts panel with AI and Code filters pre-selected (large button)
+    openCodeAiArtifactsPanel() {
+        // Open artifacts panel with AI and Code types pre-selected
+        if (this.artifacts && this.artifacts.openPanelWithFilters) {
+            this.artifacts.openPanelWithFilters(['ai', 'code']);
+        } else if (this.artifacts && this.artifacts.openPanel) {
+            // Fallback: open panel and try to set filters after
+            this.artifacts.openPanel();
+            
+            // Try to set filters after a short delay
+            setTimeout(() => {
+                if (this.artifacts.setActiveFilters) {
+                    this.artifacts.setActiveFilters(['ai', 'code']);
+                }
+            }, 100);
+        } else {
+            this.ui.showToast('Artifacts panel not available', 'warning');
+        }
+    }
+    
+    // REMOVED: exportChatArtifacts method - no longer needed
     
     // Utility - simple delegation
     getChatTimestamp(chatId) {

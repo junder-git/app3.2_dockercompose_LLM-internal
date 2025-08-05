@@ -41,12 +41,15 @@
                 <!-- Current chat title -->
                 <span class="text-light me-3" id="current-chat-title">New Chat</span>
                 <!-- Artifact management -->
-                <div class="btn-group" role="group">
-                    <button class="btn btn-outline-info btn-sm" onclick="showArtifactPanel()" title="View Artifacts">
-                        <i class="bi bi-list-ol"></i>
+                <div class="artifacts-controls d-flex align-items-center gap-2">
+                    <!-- Small artifacts panel button -->
+                    <button id="artifacts-button" class="btn btn-outline-secondary btn-sm" title="Open Artifacts Panel">
+                        <i class="bi bi-collection"></i>
                     </button>
-                    <button class="btn btn-outline-info btn-sm" onclick="exportChatArtifacts()" title="Export Artifacts">
-                        <i class="bi bi-download"></i>
+                    <!-- Large Code & AI artifacts button -->
+                    <button id="code-ai-artifacts-button" class="btn btn-primary" title="View Code & AI Artifacts">
+                        <i class="bi bi-code-slash me-2"></i>
+                        View JAI code blocks
                     </button>
                 </div>
                 <!-- New chat button -->
