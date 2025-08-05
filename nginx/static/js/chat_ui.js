@@ -520,10 +520,7 @@ class ChatUI {
     }
 
     // Message handling methods
-    addMessage(sender, content, isStreaming = false, files = []) {
-        const messagesContainer = document.getElementById('messages-content');
-        if (!messagesContainer) return null;
-        
+    addMessage(sender, content, isStreaming = false, files = []) {        
         const messageDiv = document.createElement('div');
         messageDiv.className = `message message-${sender}`;
         const roleLabel = sender === 'user' ? 'You' : sender === 'assistant' ? 'JAI' : 'System';
@@ -533,7 +530,9 @@ class ChatUI {
                 <div class="message-time">${Date.now()}</div>
             </div>
             <div class="message-content"></div>
-        `;       
+        `; 
+        const contentDiv = document.getElementById('messages-content');
+        if (!contentDiv) return null      
         // Files (for user messages)
         if (files && files.length > 0) {
             const filesDiv = document.createElement('div');
@@ -557,8 +556,18 @@ class ChatUI {
             messageDiv.appendChild(filesDiv);
         }        
         // Content
-        const contentDiv = document.createElement('div');
-        contentDiv.className = 'message-content';
+        if (sender === 'user') {
+            contentDiv.innerHTML = window.marked ? marked.parse(content) : content;
+        } else if (isStreaming) {
+            const streamDiv = document.createElement('div');
+            streamDiv.className = 'streaming-content';
+            contentDiv.appendChild(streamDiv);
+        } else {
+            contentDiv.innerHTML = window.marked ? marked.parse(content) : content;
+            this.enhanceCodeBlocks(contentDiv, content);
+        }
+        
+        messageDiv.appendChild(contentDiv);
         messagesContainer.appendChild(messageDiv);
         
         // Process with artifacts system if not streaming
