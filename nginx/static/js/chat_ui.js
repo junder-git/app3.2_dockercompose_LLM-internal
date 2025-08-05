@@ -519,16 +519,16 @@ class ChatUI {
         }
     }
 
-    // Message handling methods
+    // Message handling methods, sender seems to be nested also as content.role
     addMessage(sender, content, isStreaming = false, files = []) {
         const messagesContainer = document.getElementById('messages-content');
         if (!messagesContainer) return null;
         
         const messageElement = document.createElement('div');
-        messageElement.className = `message message-${msg.role}`;
+        messageElement.className = `message message-${content.role}`;
         
-        const timestamp = new Date(msg.timestamp * 1000).toLocaleTimeString();
-        const roleLabel = msg.role === 'user' ? 'You' : msg.role === 'assistant' ? 'JAI' : 'System';
+        const timestamp = new Date(content.timestamp * 1000).toLocaleTimeString();
+        const roleLabel = content.role === 'user' ? 'You' : content.role === 'assistant' ? 'JAI' : 'System';
         
         messageElement.innerHTML = `
             <div class="message-header">
