@@ -616,7 +616,7 @@ class ChatUI {
             this.chatInstance.artifacts.processMessageElement(messageDiv, messageType, content, files);
             
             // Save message to current chat
-            const chat = this.chats.get(this.currentChatId);
+            const chat = this.chatInstance.chats.get(this.chatInstance.currentChatId);
             if (chat) {
                 chat.messages.push({
                     role: sender === 'user' ? 'user' : 'ai',
@@ -637,6 +637,6 @@ class ChatUI {
                 this.updateChatList();
             }
         }
-        return this.chatInstance.loadChatMessages(this.currentChatId)
+        return this.chatInstance.loadChatMessages(this.chatInstance.currentChatId)
     }
 }
