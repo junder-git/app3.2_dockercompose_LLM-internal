@@ -181,7 +181,7 @@ class InternalChat {
     
     // Message Handling - delegate to Ollama
     async sendMessage() {
-        blank = {};
+        var blank = {};
         const input = document.getElementById('chat-input');
         if (!input) return;
         
