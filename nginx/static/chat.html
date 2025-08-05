@@ -1,4 +1,9 @@
-<!DOCTYPE html>
+<!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
+    <script src="/static/chat_artifacts.js"></script>
+    <script src="/static/chat.js"></script><!DOCTYPE html>
 <html lang="en" data-bs-theme="dark">
 <head>
     <meta charset="UTF-8">
@@ -35,6 +40,15 @@
             <div class="d-flex align-items-center gap-2">
                 <!-- Current chat title -->
                 <span class="text-light me-3" id="current-chat-title">New Chat</span>
+                <!-- Artifact management -->
+                <div class="btn-group" role="group">
+                    <button class="btn btn-outline-info btn-sm" onclick="showArtifactPanel()" title="View Artifacts">
+                        <i class="bi bi-list-ol"></i>
+                    </button>
+                    <button class="btn btn-outline-info btn-sm" onclick="exportChatArtifacts()" title="Export Artifacts">
+                        <i class="bi bi-download"></i>
+                    </button>
+                </div>
                 <!-- New chat button -->
                 <button class="btn btn-outline-primary btn-sm" onclick="createNewChat()">
                     <i class="bi bi-plus-circle"></i> New Chat
@@ -143,6 +157,91 @@
                         </small>
                         <small class="text-muted" id="status">Ready</small>
                     </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Artifact Panel Modal -->
+    <div class="modal fade" id="artifactPanelModal" tabindex="-1">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="bi bi-list-ol"></i> Chat Artifacts
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <!-- Search and filters -->
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <input type="text" class="form-control" id="artifact-search" placeholder="Search artifacts...">
+                        </div>
+                        <div class="col-md-3">
+                            <select class="form-select" id="artifact-type-filter">
+                                <option value="">All Types</option>
+                                <option value="in">User Messages (in)</option>
+                                <option value="out">AI Messages (out)</option>
+                                <option value="code_block">Code Blocks</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <button class="btn btn-primary w-100" onclick="refreshArtifactPanel()">
+                                <i class="bi bi-arrow-clockwise"></i> Refresh
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Artifact stats -->
+                    <div class="row mb-3">
+                        <div class="col-md-3">
+                            <div class="card text-center">
+                                <div class="card-body">
+                                    <h6 class="card-title">Total Messages</h6>
+                                    <h4 id="total-messages" class="text-primary">0</h4>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card text-center">
+                                <div class="card-body">
+                                    <h6 class="card-title">User Messages</h6>
+                                    <h4 id="user-messages" class="text-info">0</h4>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card text-center">
+                                <div class="card-body">
+                                    <h6 class="card-title">AI Messages</h6>
+                                    <h4 id="ai-messages" class="text-success">0</h4>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card text-center">
+                                <div class="card-body">
+                                    <h6 class="card-title">Code Blocks</h6>
+                                    <h4 id="code-blocks" class="text-warning">0</h4>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Artifact list -->
+                    <div class="artifact-list" id="artifact-list" style="max-height: 400px; overflow-y: auto;">
+                        <div class="text-center text-muted p-3">
+                            <i class="bi bi-inbox"></i>
+                            <p class="mb-0 mt-2">No artifacts found</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-primary" onclick="exportChatArtifacts()">
+                        <i class="bi bi-download"></i> Export All
+                    </button>
                 </div>
             </div>
         </div>
