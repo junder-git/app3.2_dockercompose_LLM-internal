@@ -527,7 +527,6 @@ class ChatUI {
         const messageDiv = document.createElement('div');
         messageDiv.className = `message message-${sender}`;
         const roleLabel = sender === 'user' ? 'You' : sender === 'assistant' ? 'JAI' : 'System';
-        
         messageDiv.innerHTML = `
             <div class="message-header">
                 <div class="message-role">${roleLabel}</div>
@@ -555,13 +554,8 @@ class ChatUI {
                 
                 filesDiv.appendChild(fileItem);
             });
-            
-            messageDiv.appendChild(headerDiv);
             messageDiv.appendChild(filesDiv);
-        } else {
-            messageDiv.appendChild(headerDiv);
-        }
-        
+        }        
         // Content
         const contentDiv = document.createElement('div');
         contentDiv.className = 'message-content';
