@@ -629,9 +629,9 @@ class ChatUI {
                 }
                 
                 this.updateChatList();
+                this.chatInstance.loadChatMessages(this.chatInstance.currentChatId)
             }
         }
-        this.chatInstance.loadChatMessages(this.chatInstance.currentChatId)
         return messageElement
     }
 }
