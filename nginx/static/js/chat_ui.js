@@ -520,15 +520,15 @@ class ChatUI {
     }
 
     // Message handling methods, sender seems to be nested also as content.role
-    addMessage(sender, content, isStreaming = false, files = []) {
+    addMessage(sender, msgObj, isStreaming = false, files = []) {
         const messagesContainer = document.getElementById('messages-content');
         if (!messagesContainer) return null;
         
         const messageElement = document.createElement('div');
-        messageElement.className = `message message-${content.role}`;
+        messageElement.className = `message message-${msgObj.role}`;
         
-        const timestamp = new Date(content.timestamp * 1000).toLocaleTimeString();
-        const roleLabel = content.role === 'user' ? 'You' : content.role === 'assistant' ? 'JAI' : 'System';
+        const timestamp = new Date(msgObj.timestamp * 1000).toLocaleTimeString();
+        const roleLabel = msgObj.role === 'user' ? 'You' : msgObj.role === 'assistant' ? 'JAI' : 'System';
         
         messageElement.innerHTML = `
             <div class="message-header">
@@ -599,14 +599,14 @@ class ChatUI {
         contentDiv.className = 'message-content';
         
         if (sender === 'user') {
-            contentDiv.innerHTML = window.marked ? marked.parse(content) : content;
+            contentDiv.innerHTML = window.marked ? marked.parse(msgObj.content) : msgObj.content;
         } else if (isStreaming) {
             const streamDiv = document.createElement('div');
             streamDiv.className = 'streaming-content';
             contentDiv.appendChild(streamDiv);
         } else {
-            contentDiv.innerHTML = window.marked ? marked.parse(content) : content;
-            this.enhanceCodeBlocks(contentDiv, content);
+            contentDiv.innerHTML = window.marked ? marked.parse(msgObj.content) : msgObj.content;
+            this.enhanceCodeBlocks(contentDiv, msgObj.content);
         }
         
         messageDiv.appendChild(contentDiv);
@@ -615,14 +615,14 @@ class ChatUI {
         // Process with artifacts system if not streaming
         if (!isStreaming && this.currentChatId) {
             const messageType = sender === 'user' ? 'in' : 'out';
-            this.chatInstance.artifacts.processMessageElement(messageDiv, messageType, content, files);
+            this.chatInstance.artifacts.processMessageElement(messageDiv, messageType, msgObj.content, files);
             
             // Save message to current chat
             const chat = this.chats.get(this.currentChatId);
             if (chat) {
                 chat.messages.push({
                     role: sender === 'user' ? 'user' : 'ai',
-                    content: content,
+                    content: msgObj.content,
                     files: files || [],
                     timestamp: Date.now()
                 });
@@ -631,7 +631,7 @@ class ChatUI {
                 
                 // Update chat title if this is the first user message
                 if (sender === 'user' && chat.messages.filter(m => m.role === 'user').length === 1) {
-                    const newTitle = content.length > 30 ? content.substring(0, 30) + '...' : content;
+                    const newTitle = msgObj.content.length > 30 ? msgObj.content.substring(0, 30) + '...' : msgObj.content;
                     chat.title = newTitle;
                     this.updateCurrentChatTitle(newTitle);
                 }
