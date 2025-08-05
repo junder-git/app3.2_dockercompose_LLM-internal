@@ -22,81 +22,157 @@
     <!-- Navigation -->
     <nav class="navbar navbar-dark bg-dark">
         <div class="container-fluid">
-            <span class="navbar-brand">
-                <i class="bi bi-lightning-charge-fill text-primary"></i> 
-                Internal Chat (admin1)
-            </span>
-            <div class="navbar-nav">
-                <button class="btn btn-outline-light btn-sm" onclick="clearAllHistory()">
-                    <i class="bi bi-trash"></i> Clear All
+            <div class="d-flex align-items-center">
+                <!-- Sidebar toggle -->
+                <button class="btn btn-outline-light btn-sm me-3" id="sidebar-toggle">
+                    <i class="bi bi-list"></i>
+                </button>
+                <span class="navbar-brand mb-0">
+                    <i class="bi bi-lightning-charge-fill text-primary"></i> 
+                    Internal Chat (admin1)
+                </span>
+            </div>
+            <div class="d-flex align-items-center gap-2">
+                <!-- Current chat title -->
+                <span class="text-light me-3" id="current-chat-title">New Chat</span>
+                <!-- New chat button -->
+                <button class="btn btn-outline-primary btn-sm" onclick="createNewChat()">
+                    <i class="bi bi-plus-circle"></i> New Chat
+                </button>
+                <!-- Clear current chat -->
+                <button class="btn btn-outline-danger btn-sm" onclick="clearCurrentChat()">
+                    <i class="bi bi-trash"></i> Clear
                 </button>
             </div>
         </div>
     </nav>
 
-    <!-- Main chat container -->
-    <div class="chat-container">
-        <!-- Messages area -->
-        <div class="chat-messages" id="chat-messages">
-            <!-- Welcome message -->
-            <div id="welcome-prompt" class="welcome-prompt">
-                <h4><i class="bi bi-chat-dots text-primary"></i> Internal AI Chat</h4>
-                <p>Direct connection to your Ollama model. No authentication required.</p>
-                <div class="text-muted">
-                    <small>💡 <kbd>Enter</kbd> to send • <kbd>Shift+Enter</kbd> for new line • <kbd>📎</kbd> to attach files</small>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <div class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <h6><i class="bi bi-chat-dots"></i> Chat History</h6>
+                <div class="sidebar-actions">
+                    <button class="btn btn-sm btn-outline-secondary" onclick="refreshChatList()" title="Refresh">
+                        <i class="bi bi-arrow-clockwise"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteAllChats()" title="Delete All">
+                        <i class="bi bi-trash"></i>
+                    </button>
                 </div>
             </div>
             
-            <!-- Messages will be dynamically added here -->
-            <div id="messages-content"></div>
+            <!-- Search chats -->
+            <div class="sidebar-search">
+                <input type="text" class="form-control form-control-sm" id="chat-search" placeholder="Search chats...">
+            </div>
+            
+            <!-- Chat list -->
+            <div class="chat-list" id="chat-list">
+                <div class="text-center text-muted p-3">
+                    <i class="bi bi-chat-dots-fill"></i>
+                    <p class="mb-0 mt-2">No chats yet</p>
+                    <small>Start a new conversation</small>
+                </div>
+            </div>
         </div>
-        
-        <!-- Input area -->
-        <div class="chat-input-container">
-            <!-- File upload area (hidden by default) -->
-            <div id="file-upload-area" class="file-upload-area" style="display: none;">
-                <div class="file-upload-header">
-                    <span><i class="bi bi-paperclip"></i> Attached Files</span>
-                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearAllFiles()">
-                        <i class="bi bi-x"></i> Clear All
-                    </button>
+
+        <!-- Main chat area -->
+        <div class="main-content">
+            <!-- Chat container -->
+            <div class="chat-container">
+                <!-- Messages area -->
+                <div class="chat-messages" id="chat-messages">
+                    <!-- Welcome message -->
+                    <div id="welcome-prompt" class="welcome-prompt">
+                        <h4><i class="bi bi-chat-dots text-primary"></i> Internal AI Chat</h4>
+                        <p>Direct connection to your Ollama model. Create unlimited conversations.</p>
+                        <div class="text-muted">
+                            <small>💡 <kbd>Enter</kbd> to send • <kbd>Shift+Enter</kbd> for new line • <kbd>📎</kbd> to attach files</small>
+                        </div>
+                    </div>
+                    
+                    <!-- Messages will be dynamically added here -->
+                    <div id="messages-content"></div>
                 </div>
-                <div id="file-list" class="file-list"></div>
+                
+                <!-- Input area -->
+                <div class="chat-input-container">
+                    <!-- File upload area (hidden by default) -->
+                    <div id="file-upload-area" class="file-upload-area" style="display: none;">
+                        <div class="file-upload-header">
+                            <span><i class="bi bi-paperclip"></i> Attached Files</span>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearAllFiles()">
+                                <i class="bi bi-x"></i> Clear All
+                            </button>
+                        </div>
+                        <div id="file-list" class="file-list"></div>
+                    </div>
+                    
+                    <form id="chat-form" class="chat-input-form">
+                        <div class="input-group-container">
+                            <!-- File upload button -->
+                            <button type="button" class="btn btn-outline-secondary attach-btn" id="attach-button" title="Attach files">
+                                <i class="bi bi-paperclip"></i>
+                            </button>
+                            
+                            <!-- Hidden file input -->
+                            <input type="file" id="file-input" multiple accept="*/*" style="display: none;">
+                            
+                            <textarea 
+                                class="form-control chat-input" 
+                                id="chat-input" 
+                                placeholder="Ask anything..." 
+                                rows="1"
+                                required></textarea>
+                            
+                            <button type="submit" class="btn btn-primary btn-send" id="send-button">
+                                <i class="bi bi-send"></i>
+                            </button>
+                            
+                            <button type="button" class="btn btn-danger btn-send" id="stop-button" style="display: none;">
+                                <i class="bi bi-stop"></i>
+                            </button>
+                        </div>
+                    </form>
+                    
+                    <div class="d-flex justify-content-between align-items-center mt-2">
+                        <small class="text-muted">
+                            <span id="char-count">0</span> characters
+                            <span id="file-count" style="display: none;"> • <span id="file-count-number">0</span> files</span>
+                        </small>
+                        <small class="text-muted" id="status">Ready</small>
+                    </div>
+                </div>
             </div>
-            
-            <form id="chat-form" class="chat-input-form">
-                <div class="input-group-container">
-                    <!-- File upload button -->
-                    <button type="button" class="btn btn-outline-secondary attach-btn" id="attach-button" title="Attach files">
-                        <i class="bi bi-paperclip"></i>
-                    </button>
-                    
-                    <!-- Hidden file input -->
-                    <input type="file" id="file-input" multiple accept="*/*" style="display: none;">
-                    
-                    <textarea 
-                        class="form-control chat-input" 
-                        id="chat-input" 
-                        placeholder="Ask anything..." 
-                        rows="1"
-                        required></textarea>
-                    
-                    <button type="submit" class="btn btn-primary btn-send" id="send-button">
-                        <i class="bi bi-send"></i>
-                    </button>
-                    
-                    <button type="button" class="btn btn-danger btn-send" id="stop-button" style="display: none;">
-                        <i class="bi bi-stop"></i>
-                    </button>
+        </div>
+    </div>
+
+    <!-- Chat Options Modal -->
+    <div class="modal fade" id="chatOptionsModal" tabindex="-1">
+        <div class="modal-dialog modal-sm">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h6 class="modal-title">Chat Options</h6>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
-            </form>
-            
-            <div class="d-flex justify-content-between align-items-center mt-2">
-                <small class="text-muted">
-                    <span id="char-count">0</span> characters
-                    <span id="file-count" style="display: none;"> • <span id="file-count-number">0</span> files</span>
-                </small>
-                <small class="text-muted" id="status">Ready</small>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Rename Chat</label>
+                        <input type="text" class="form-control form-control-sm" id="rename-chat-input" placeholder="Enter new name">
+                    </div>
+                    <div class="d-grid gap-2">
+                        <button class="btn btn-primary btn-sm" onclick="renameChatConfirm()">
+                            <i class="bi bi-pencil"></i> Rename
+                        </button>
+                        <button class="btn btn-outline-secondary btn-sm" onclick="duplicateChat()">
+                            <i class="bi bi-files"></i> Duplicate
+                        </button>
+                        <button class="btn btn-outline-danger btn-sm" onclick="deleteChatConfirm()">
+                            <i class="bi bi-trash"></i> Delete
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

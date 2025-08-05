@@ -39,6 +39,16 @@ local function format_files_for_context(files)
     return file_context
 end
 
+-- Generate Redis key for chat history
+local function get_chat_key(chat_id)
+    if chat_id and chat_id ~= "" then
+        return "chat:history:" .. USER_ID .. ":" .. chat_id
+    else
+        -- Fallback to old format for compatibility
+        return "chat:history:" .. USER_ID
+    end
+end
+
 -- Serve the chat HTML page
 function _M.serve_chat_page()
     local file = io.open("/usr/local/openresty/nginx/static/chat.html", "r")
@@ -59,6 +69,10 @@ end
 function _M.handle_chat_history()
     ngx.header["Content-Type"] = "application/json"
     
+    -- Get chat_id from query parameter
+    local args = ngx.req.get_uri_args()
+    local chat_id = args.chat_id
+    
     local redis = redis_client.connect()
     if not redis then
         ngx.status = 500
@@ -66,7 +80,7 @@ function _M.handle_chat_history()
         return
     end
     
-    local history_key = "chat:history:" .. USER_ID
+    local history_key = get_chat_key(chat_id)
     local messages_json = redis:get(history_key)
     
     redis_client.close(redis)
@@ -82,8 +96,155 @@ function _M.handle_chat_history()
     ngx.say(cjson.encode({messages = messages}))
 end
 
+-- Get list of all chats for a user
+function _M.handle_chat_list()
+    ngx.header["Content-Type"] = "application/json"
+    
+    local redis = redis_client.connect()
+    if not redis then
+        ngx.status = 500
+        ngx.say(cjson.encode({error = "Redis connection failed"}))
+        return
+    end
+    
+    -- Get all chat keys for this user
+    local pattern = "chat:history:" .. USER_ID .. ":*"
+    local keys = redis:keys(pattern)
+    
+    local chats = {}
+    
+    if keys and type(keys) == "table" then
+        for _, key in ipairs(keys) do
+            -- Extract chat_id from key
+            local chat_id = string.match(key, "chat:history:" .. USER_ID .. ":(.+)")
+            
+            if chat_id then
+                local messages_json = redis:get(key)
+                local message_count = 0
+                local last_updated = nil
+                local preview = ""
+                
+                if messages_json and messages_json ~= ngx.null then
+                    local ok, messages = pcall(cjson.decode, messages_json)
+                    if ok and type(messages) == "table" then
+                        message_count = #messages
+                        
+                        -- Get last message for preview and timestamp
+                        if message_count > 0 then
+                            local last_message = messages[message_count]
+                            if last_message.content then
+                                preview = string.sub(last_message.content, 1, 100)
+                            end
+                            last_updated = last_message.timestamp or ngx.time()
+                        end
+                    end
+                end
+                
+                table.insert(chats, {
+                    id = chat_id,
+                    message_count = message_count,
+                    last_updated = last_updated or ngx.time(),
+                    preview = preview
+                })
+            end
+        end
+    end
+    
+    -- Sort chats by last updated (newest first)
+    table.sort(chats, function(a, b)
+        return (a.last_updated or 0) > (b.last_updated or 0)
+    end)
+    
+    redis_client.close(redis)
+    ngx.say(cjson.encode({chats = chats}))
+end
+
 -- Clear chat history
 function _M.handle_clear_chat()
+    if ngx.req.get_method() ~= "POST" then
+        ngx.status = 405
+        ngx.say(cjson.encode({error = "Method not allowed"}))
+        return
+    end
+    
+    ngx.header["Content-Type"] = "application/json"
+    
+    -- Parse request body to get chat_id
+    ngx.req.read_body()
+    local body = ngx.req.get_body_data()
+    local chat_id = nil
+    
+    if body then
+        local ok, request_data = pcall(cjson.decode, body)
+        if ok and request_data.chat_id then
+            chat_id = request_data.chat_id
+        end
+    end
+    
+    local redis = redis_client.connect()
+    if not redis then
+        ngx.status = 500
+        ngx.say(cjson.encode({error = "Redis connection failed"}))
+        return
+    end
+    
+    local history_key = get_chat_key(chat_id)
+    redis:del(history_key)
+    
+    redis_client.close(redis)
+    
+    ngx.say(cjson.encode({success = true}))
+end
+
+-- Delete a specific chat
+function _M.handle_delete_chat()
+    if ngx.req.get_method() ~= "POST" then
+        ngx.status = 405
+        ngx.say(cjson.encode({error = "Method not allowed"}))
+        return
+    end
+    
+    ngx.header["Content-Type"] = "application/json"
+    
+    -- Parse request body to get chat_id
+    ngx.req.read_body()
+    local body = ngx.req.get_body_data()
+    
+    if not body then
+        ngx.status = 400
+        ngx.say(cjson.encode({error = "No request body"}))
+        return
+    end
+    
+    local ok, request_data = pcall(cjson.decode, body)
+    if not ok or not request_data.chat_id then
+        ngx.status = 400
+        ngx.say(cjson.encode({error = "Missing chat_id"}))
+        return
+    end
+    
+    local chat_id = request_data.chat_id
+    
+    local redis = redis_client.connect()
+    if not redis then
+        ngx.status = 500
+        ngx.say(cjson.encode({error = "Redis connection failed"}))
+        return
+    end
+    
+    local history_key = get_chat_key(chat_id)
+    local result = redis:del(history_key)
+    
+    redis_client.close(redis)
+    
+    ngx.say(cjson.encode({
+        success = true,
+        deleted = result > 0
+    }))
+end
+
+-- Delete all chats for a user
+function _M.handle_delete_all_chats()
     if ngx.req.get_method() ~= "POST" then
         ngx.status = 405
         ngx.say(cjson.encode({error = "Method not allowed"}))
@@ -99,15 +260,37 @@ function _M.handle_clear_chat()
         return
     end
     
-    local history_key = "chat:history:" .. USER_ID
-    redis:del(history_key)
+    -- Get all chat keys for this user
+    local pattern = "chat:history:" .. USER_ID .. ":*"
+    local keys = redis:keys(pattern)
+    
+    local deleted_count = 0
+    
+    if keys and type(keys) == "table" then
+        for _, key in ipairs(keys) do
+            local result = redis:del(key)
+            if result > 0 then
+                deleted_count = deleted_count + 1
+            end
+        end
+    end
+    
+    -- Also delete the old format key for compatibility
+    local old_key = "chat:history:" .. USER_ID
+    local old_result = redis:del(old_key)
+    if old_result > 0 then
+        deleted_count = deleted_count + 1
+    end
     
     redis_client.close(redis)
     
-    ngx.say(cjson.encode({success = true}))
+    ngx.say(cjson.encode({
+        success = true,
+        deleted_count = deleted_count
+    }))
 end
 
--- Handle streaming chat with file support
+-- Handle streaming chat with file support and multi-chat
 function _M.handle_chat_stream()
     if ngx.req.get_method() ~= "POST" then
         ngx.status = 405
@@ -134,6 +317,7 @@ function _M.handle_chat_stream()
     
     local user_message = request_data.message or ""
     local files = request_data.files or {}
+    local chat_id = request_data.chat_id
     
     -- If no message and no files, return error
     if user_message == "" and #files == 0 then
@@ -150,8 +334,8 @@ function _M.handle_chat_stream()
         return
     end
     
-    -- Get existing conversation history
-    local history_key = "chat:history:" .. USER_ID
+    -- Get existing conversation history for this specific chat
+    local history_key = get_chat_key(chat_id)
     local existing_history = redis:get(history_key)
     
     local messages = {}
@@ -170,7 +354,7 @@ function _M.handle_chat_stream()
         complete_message = complete_message .. file_context
     end
     
-    -- Add user message to history (store original message + file info separately for UI)
+    -- Add user message to history
     local user_message_entry = {
         role = "user",
         content = user_message,
@@ -285,9 +469,9 @@ function _M.handle_chat_stream()
         timestamp = ngx.time()
     })
     
-    -- Save updated history to Redis
+    -- Save updated history to Redis with TTL
     redis:set(history_key, cjson.encode(messages))
-    redis:expire(history_key, 86400 * 7) -- Expire after 7 days
+    redis:expire(history_key, 86400 * 30) -- Expire after 30 days
     
     redis_client.close(redis)
     httpc:close()

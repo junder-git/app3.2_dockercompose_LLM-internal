@@ -1,20 +1,25 @@
-// Simple internal chat client with file upload support
+// Multi-chat internal chat client with file upload support
 class InternalChat {
     constructor() {
         this.isTyping = false;
         this.abortController = null;
-        this.messageCount = 0;
         this.attachedFiles = [];
+        this.currentChatId = null;
+        this.chats = new Map();
+        this.chatOptionsModal = null;
+        this.selectedChatForOptions = null;
         
         this.init();
     }
     
     init() {
         this.setupEventListeners();
-        this.loadChatHistory();
         this.setupMarkdown();
         this.setupFileUpload();
-        console.log('Internal chat initialized with file upload support');
+        this.setupSidebar();
+        this.loadChatList();
+        this.createNewChat(); // Start with a new chat
+        console.log('Multi-chat internal chat initialized');
     }
     
     setupMarkdown() {
@@ -74,25 +79,428 @@ class InternalChat {
             fileInput.addEventListener('change', (e) => this.handleFileSelect(e));
         }
         
+        // Sidebar toggle
+        const sidebarToggle = document.getElementById('sidebar-toggle');
+        if (sidebarToggle) {
+            sidebarToggle.addEventListener('click', () => this.toggleSidebar());
+        }
+        
+        // Chat search
+        const chatSearch = document.getElementById('chat-search');
+        if (chatSearch) {
+            chatSearch.addEventListener('input', (e) => this.searchChats(e.target.value));
+        }
+        
         // Drag and drop
         this.setupDragAndDrop();
+        
+        // Initialize chat options modal
+        this.chatOptionsModal = new bootstrap.Modal(document.getElementById('chatOptionsModal'));
     }
     
+    setupSidebar() {
+        // Handle sidebar interactions
+        this.setupSidebarResize();
+    }
+    
+    setupSidebarResize() {
+        // Could add resize functionality here if needed
+    }
+    
+    toggleSidebar() {
+        const sidebar = document.getElementById('sidebar');
+        if (sidebar) {
+            sidebar.classList.toggle('collapsed');
+        }
+    }
+    
+    // Chat Management Methods
+    generateChatId() {
+        return 'chat_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    }
+    
+    createNewChat() {
+        const chatId = this.generateChatId();
+        const chat = {
+            id: chatId,
+            title: 'New Chat',
+            messages: [],
+            createdAt: new Date(),
+            updatedAt: new Date()
+        };
+        
+        this.chats.set(chatId, chat);
+        this.switchToChat(chatId);
+        this.updateChatList();
+        this.saveChatList();
+        
+        return chatId;
+    }
+    
+    switchToChat(chatId) {
+        if (!this.chats.has(chatId)) {
+            console.error('Chat not found:', chatId);
+            return;
+        }
+        
+        // Save current chat if switching away
+        if (this.currentChatId && this.currentChatId !== chatId) {
+            this.saveCurrentChatMessages();
+        }
+        
+        this.currentChatId = chatId;
+        const chat = this.chats.get(chatId);
+        
+        // Update UI
+        this.updateCurrentChatTitle(chat.title);
+        this.loadChatMessages(chat.messages);
+        this.updateChatListActiveState();
+        
+        // Clear any attached files when switching chats
+        this.clearAllFiles();
+    }
+    
+    updateCurrentChatTitle(title) {
+        const titleElement = document.getElementById('current-chat-title');
+        if (titleElement) {
+            titleElement.textContent = title;
+        }
+    }
+    
+    loadChatMessages(messages) {
+        const messagesContainer = document.getElementById('messages-content');
+        const welcomePrompt = document.getElementById('welcome-prompt');
+        
+        if (!messagesContainer) return;
+        
+        // Clear current messages
+        messagesContainer.innerHTML = '';
+        
+        if (messages.length === 0) {
+            // Show welcome prompt for empty chats
+            if (welcomePrompt) {
+                welcomePrompt.style.display = 'block';
+            }
+        } else {
+            // Hide welcome prompt and load messages
+            if (welcomePrompt) {
+                welcomePrompt.style.display = 'none';
+            }
+            
+            messages.forEach(msg => {
+                this.addMessage(msg.role, msg.content, false, msg.files || []);
+            });
+            
+            this.scrollToBottom();
+        }
+    }
+    
+    saveCurrentChatMessages() {
+        if (!this.currentChatId) return;
+        
+        const chat = this.chats.get(this.currentChatId);
+        if (!chat) return;
+        
+        // Messages are automatically saved when added, but this ensures consistency
+        this.saveChatToStorage(chat);
+    }
+    
+    deleteChat(chatId) {
+        if (!this.chats.has(chatId)) return;
+        
+        this.chats.delete(chatId);
+        
+        // If deleting current chat, switch to another or create new
+        if (this.currentChatId === chatId) {
+            const remainingChats = Array.from(this.chats.keys());
+            if (remainingChats.length > 0) {
+                this.switchToChat(remainingChats[0]);
+            } else {
+                this.createNewChat();
+            }
+        }
+        
+        this.updateChatList();
+        this.saveChatList();
+        this.deleteChatFromStorage(chatId);
+    }
+    
+    renameChat(chatId, newTitle) {
+        const chat = this.chats.get(chatId);
+        if (!chat) return;
+        
+        chat.title = newTitle;
+        chat.updatedAt = new Date();
+        
+        if (chatId === this.currentChatId) {
+            this.updateCurrentChatTitle(newTitle);
+        }
+        
+        this.updateChatList();
+        this.saveChatToStorage(chat);
+    }
+    
+    duplicateChat(chatId) {
+        const originalChat = this.chats.get(chatId);
+        if (!originalChat) return;
+        
+        const newChatId = this.generateChatId();
+        const duplicatedChat = {
+            id: newChatId,
+            title: originalChat.title + ' (Copy)',
+            messages: JSON.parse(JSON.stringify(originalChat.messages)), // Deep clone
+            createdAt: new Date(),
+            updatedAt: new Date()
+        };
+        
+        this.chats.set(newChatId, duplicatedChat);
+        this.switchToChat(newChatId);
+        this.updateChatList();
+        this.saveChatToStorage(duplicatedChat);
+        
+        return newChatId;
+    }
+    
+    // UI Update Methods
+    updateChatList() {
+        const chatList = document.getElementById('chat-list');
+        if (!chatList) return;
+        
+        const chatsArray = Array.from(this.chats.values())
+            .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+        
+        if (chatsArray.length === 0) {
+            chatList.innerHTML = `
+                <div class="text-center text-muted p-3">
+                    <i class="bi bi-chat-dots-fill"></i>
+                    <p class="mb-0 mt-2">No chats yet</p>
+                    <small>Start a new conversation</small>
+                </div>
+            `;
+            return;
+        }
+        
+        chatList.innerHTML = '';
+        
+        chatsArray.forEach(chat => {
+            const chatItem = this.createChatListItem(chat);
+            chatList.appendChild(chatItem);
+        });
+    }
+    
+    createChatListItem(chat) {
+        const chatItem = document.createElement('div');
+        chatItem.className = 'chat-item';
+        chatItem.dataset.chatId = chat.id;
+        
+        if (chat.id === this.currentChatId) {
+            chatItem.classList.add('active');
+        }
+        
+        // Get preview text from last message
+        const lastMessage = chat.messages[chat.messages.length - 1];
+        const preview = lastMessage ? 
+            (lastMessage.content.length > 60 ? 
+                lastMessage.content.substring(0, 60) + '...' : 
+                lastMessage.content) : 
+            'No messages yet';
+        
+        const messageCount = chat.messages.length;
+        const formattedDate = this.formatChatDate(chat.updatedAt);
+        
+        chatItem.innerHTML = `
+            <div class="chat-item-header">
+                <div class="chat-item-title">${this.escapeHtml(chat.title)}</div>
+                <div class="chat-item-menu">
+                    <button onclick="window.chat.showChatOptions('${chat.id}')" title="Options">
+                        <i class="bi bi-three-dots"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="chat-item-preview">${this.escapeHtml(preview)}</div>
+            <div class="chat-item-meta">
+                <div class="chat-item-date">${formattedDate}</div>
+                <div class="chat-item-count">${messageCount}</div>
+            </div>
+        `;
+        
+        // Add click handler for switching chats
+        chatItem.addEventListener('click', (e) => {
+            if (!e.target.closest('.chat-item-menu')) {
+                this.switchToChat(chat.id);
+            }
+        });
+        
+        return chatItem;
+    }
+    
+    updateChatListActiveState() {
+        const chatItems = document.querySelectorAll('.chat-item');
+        chatItems.forEach(item => {
+            if (item.dataset.chatId === this.currentChatId) {
+                item.classList.add('active');
+            } else {
+                item.classList.remove('active');
+            }
+        });
+    }
+    
+    formatChatDate(date) {
+        const now = new Date();
+        const chatDate = new Date(date);
+        const diffInMs = now - chatDate;
+        const diffInHours = diffInMs / (1000 * 60 * 60);
+        
+        if (diffInHours < 1) {
+            return 'Just now';
+        } else if (diffInHours < 24) {
+            return `${Math.floor(diffInHours)}h ago`;
+        } else if (diffInHours < 24 * 7) {
+            return `${Math.floor(diffInHours / 24)}d ago`;
+        } else {
+            return chatDate.toLocaleDateString();
+        }
+    }
+    
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+    
+    searchChats(query) {
+        const chatItems = document.querySelectorAll('.chat-item');
+        const lowerQuery = query.toLowerCase();
+        
+        chatItems.forEach(item => {
+            const title = item.querySelector('.chat-item-title').textContent.toLowerCase();
+            const preview = item.querySelector('.chat-item-preview').textContent.toLowerCase();
+            
+            if (title.includes(lowerQuery) || preview.includes(lowerQuery)) {
+                item.style.display = 'block';
+            } else {
+                item.style.display = 'none';
+            }
+        });
+    }
+    
+    // Chat Options Methods
+    showChatOptions(chatId) {
+        this.selectedChatForOptions = chatId;
+        const chat = this.chats.get(chatId);
+        
+        if (!chat) return;
+        
+        // Set current title in rename input
+        const renameInput = document.getElementById('rename-chat-input');
+        if (renameInput) {
+            renameInput.value = chat.title;
+        }
+        
+        this.chatOptionsModal.show();
+    }
+    
+    // Storage Methods
+    saveChatList() {
+        try {
+            const chatData = Array.from(this.chats.values()).map(chat => ({
+                id: chat.id,
+                title: chat.title,
+                createdAt: chat.createdAt.toISOString(),
+                updatedAt: chat.updatedAt.toISOString(),
+                messageCount: chat.messages.length
+            }));
+            
+            localStorage.setItem('internal_chat_list', JSON.stringify(chatData));
+        } catch (error) {
+            console.error('Failed to save chat list:', error);
+        }
+    }
+    
+    loadChatList() {
+        try {
+            const chatListData = localStorage.getItem('internal_chat_list');
+            if (chatListData) {
+                const chatList = JSON.parse(chatListData);
+                
+                // Load basic chat info first
+                chatList.forEach(chatInfo => {
+                    if (!this.chats.has(chatInfo.id)) {
+                        const chat = {
+                            id: chatInfo.id,
+                            title: chatInfo.title,
+                            messages: [],
+                            createdAt: new Date(chatInfo.createdAt),
+                            updatedAt: new Date(chatInfo.updatedAt)
+                        };
+                        this.chats.set(chatInfo.id, chat);
+                        
+                        // Load messages lazily when needed
+                        this.loadChatFromStorage(chatInfo.id);
+                    }
+                });
+                
+                this.updateChatList();
+            }
+        } catch (error) {
+            console.error('Failed to load chat list:', error);
+        }
+    }
+    
+    saveChatToStorage(chat) {
+        try {
+            localStorage.setItem(`internal_chat_${chat.id}`, JSON.stringify({
+                id: chat.id,
+                title: chat.title,
+                messages: chat.messages,
+                createdAt: chat.createdAt.toISOString(),
+                updatedAt: chat.updatedAt.toISOString()
+            }));
+        } catch (error) {
+            console.error('Failed to save chat to storage:', error);
+        }
+    }
+    
+    loadChatFromStorage(chatId) {
+        try {
+            const chatData = localStorage.getItem(`internal_chat_${chatId}`);
+            if (chatData) {
+                const parsed = JSON.parse(chatData);
+                const chat = this.chats.get(chatId);
+                
+                if (chat) {
+                    chat.messages = parsed.messages || [];
+                    chat.title = parsed.title;
+                    chat.createdAt = new Date(parsed.createdAt);
+                    chat.updatedAt = new Date(parsed.updatedAt);
+                }
+            }
+        } catch (error) {
+            console.error('Failed to load chat from storage:', error);
+        }
+    }
+    
+    deleteChatFromStorage(chatId) {
+        try {
+            localStorage.removeItem(`internal_chat_${chatId}`);
+        } catch (error) {
+            console.error('Failed to delete chat from storage:', error);
+        }
+    }
+    
+    // File Upload Methods (same as before)
     setupFileUpload() {
-        // Initialize file upload UI
         this.updateFileUploadUI();
     }
     
     setupDragAndDrop() {
         const chatContainer = document.querySelector('.chat-input-container');
         
-        // Prevent default drag behaviors
         ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
             chatContainer.addEventListener(eventName, this.preventDefaults, false);
             document.body.addEventListener(eventName, this.preventDefaults, false);
         });
         
-        // Highlight drop area when item is dragged over it
         ['dragenter', 'dragover'].forEach(eventName => {
             chatContainer.addEventListener(eventName, () => this.highlight(chatContainer), false);
         });
@@ -101,7 +509,6 @@ class InternalChat {
             chatContainer.addEventListener(eventName, () => this.unhighlight(chatContainer), false);
         });
         
-        // Handle dropped files
         chatContainer.addEventListener('drop', (e) => this.handleDrop(e), false);
     }
     
@@ -134,13 +541,11 @@ class InternalChat {
     handleFileSelect(e) {
         const files = e.target.files;
         this.addFiles(files);
-        // Clear the input so the same file can be selected again
         e.target.value = '';
     }
     
     addFiles(files) {
         Array.from(files).forEach(file => {
-            // Check if file already exists
             const existingFile = this.attachedFiles.find(f => 
                 f.name === file.name && f.size === file.size && f.lastModified === file.lastModified
             );
@@ -171,12 +576,10 @@ class InternalChat {
         const fileCountNumber = document.getElementById('file-count-number');
         
         if (this.attachedFiles.length > 0) {
-            // Show upload area
             if (fileUploadArea) {
                 fileUploadArea.style.display = 'block';
             }
             
-            // Update file list
             if (fileList) {
                 fileList.innerHTML = '';
                 this.attachedFiles.forEach((file, index) => {
@@ -185,28 +588,23 @@ class InternalChat {
                 });
             }
             
-            // Update attach button style
             if (attachButton) {
                 attachButton.classList.add('has-files');
             }
             
-            // Show file count
             if (fileCount && fileCountNumber) {
                 fileCount.style.display = 'inline';
                 fileCountNumber.textContent = this.attachedFiles.length;
             }
         } else {
-            // Hide upload area
             if (fileUploadArea) {
                 fileUploadArea.style.display = 'none';
             }
             
-            // Update attach button style
             if (attachButton) {
                 attachButton.classList.remove('has-files');
             }
             
-            // Hide file count
             if (fileCount) {
                 fileCount.style.display = 'none';
             }
@@ -255,6 +653,7 @@ class InternalChat {
         return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
     }
     
+    // Message handling methods
     updateCharCount() {
         const textarea = document.getElementById('chat-input');
         const countEl = document.getElementById('char-count');
@@ -378,48 +777,66 @@ class InternalChat {
             contentDiv.appendChild(streamDiv);
         } else {
             contentDiv.innerHTML = window.marked ? marked.parse(content) : content;
-            
-            // Apply syntax highlighting and add copy buttons to code blocks
             this.enhanceCodeBlocks(contentDiv, content);
         }
         
         messageDiv.appendChild(contentDiv);
         messagesContainer.appendChild(messageDiv);
         
+        // Save message to current chat if not streaming
+        if (!isStreaming && this.currentChatId) {
+            const chat = this.chats.get(this.currentChatId);
+            if (chat) {
+                chat.messages.push({
+                    role: sender === 'user' ? 'user' : 'ai',
+                    content: content,
+                    files: files || [],
+                    timestamp: Date.now()
+                });
+                
+                chat.updatedAt = new Date();
+                
+                // Update chat title if this is the first user message
+                if (sender === 'user' && chat.messages.filter(m => m.role === 'user').length === 1) {
+                    const newTitle = content.length > 30 ? content.substring(0, 30) + '...' : content;
+                    chat.title = newTitle;
+                    this.updateCurrentChatTitle(newTitle);
+                }
+                
+                this.updateChatList();
+                this.saveChatToStorage(chat);
+                this.saveChatList();
+            }
+        }
+        
         this.scrollToBottom();
         return messageDiv;
     }
     
     enhanceCodeBlocks(contentDiv, originalContent) {
-        // Apply syntax highlighting
         if (window.Prism) {
             contentDiv.querySelectorAll('pre code').forEach((block) => {
                 Prism.highlightElement(block);
             });
         }
         
-        // Add copy buttons to each code block
         contentDiv.querySelectorAll('pre').forEach((preElement, index) => {
             this.addCopyButtonToCodeBlock(preElement, originalContent);
         });
         
-        // Add overall message copy button
         this.addMessageCopyButton(contentDiv, originalContent);
     }
     
     addCopyButtonToCodeBlock(preElement, originalContent) {
-        // Get the code content from the code element inside pre
         const codeElement = preElement.querySelector('code');
         if (!codeElement) return;
         
         const codeText = codeElement.textContent || codeElement.innerText;
         
-        // Create wrapper for positioning
         const wrapper = document.createElement('div');
         wrapper.style.position = 'relative';
         wrapper.style.marginBottom = '1rem';
         
-        // Create copy button
         const copyButton = document.createElement('button');
         copyButton.className = 'btn btn-outline-secondary btn-sm code-copy-btn';
         copyButton.innerHTML = '<i class="bi bi-clipboard"></i>';
@@ -448,14 +865,12 @@ class InternalChat {
             this.copyToClipboard(codeText, copyButton);
         };
         
-        // Wrap the pre element and add the button
         preElement.parentNode.insertBefore(wrapper, preElement);
         wrapper.appendChild(preElement);
         wrapper.appendChild(copyButton);
     }
     
     addMessageCopyButton(contentDiv, content) {
-        // Add overall message copy button
         const copyButton = document.createElement('button');
         copyButton.className = 'btn btn-outline-secondary btn-sm copy-btn';
         copyButton.innerHTML = '<i class="bi bi-clipboard"></i> Copy message';
@@ -477,12 +892,15 @@ class InternalChat {
         if (!message && this.attachedFiles.length === 0) return;
         if (this.isTyping) return;
         
-        // Prepare message content with file information
+        // Ensure we have a current chat
+        if (!this.currentChatId) {
+            this.createNewChat();
+        }
+        
         let messageContent = message;
-        const filesToSend = [...this.attachedFiles]; // Copy the array
+        const filesToSend = [...this.attachedFiles];
         
         if (filesToSend.length > 0) {
-            // Add file information to the message
             const fileInfo = filesToSend.map(file => 
                 `📎 ${file.name} (${this.formatFileSize(file.size)})`
             ).join('\n');
@@ -520,13 +938,12 @@ class InternalChat {
     }
     
     async streamResponse(message, aiMessage, files = []) {
-        // Prepare the request body
         const requestBody = {
             message: message,
-            files: []
+            files: [],
+            chatId: this.currentChatId
         };
         
-        // Process files - convert to base64 for text files, or just metadata for others
         if (files && files.length > 0) {
             for (const file of files) {
                 try {
@@ -536,7 +953,6 @@ class InternalChat {
                         size: file.size
                     };
                     
-                    // For text-based files, include content
                     if (this.isTextFile(file)) {
                         const content = await this.readFileAsText(file);
                         fileData.content = content;
@@ -635,16 +1051,30 @@ class InternalChat {
     finishStreaming(messageElement, finalContent) {
         const contentDiv = messageElement.querySelector('.message-content');
         if (contentDiv) {
-            // Remove streaming class and add final content
             contentDiv.innerHTML = '';
             
-            // Create content wrapper
             const contentWrapper = document.createElement('div');
             contentWrapper.innerHTML = window.marked ? marked.parse(finalContent) : finalContent;
             contentDiv.appendChild(contentWrapper);
             
-            // Enhance with copy buttons for code blocks and message
             this.enhanceCodeBlocks(contentDiv, finalContent);
+            
+            // Save AI message to current chat
+            if (this.currentChatId) {
+                const chat = this.chats.get(this.currentChatId);
+                if (chat) {
+                    chat.messages.push({
+                        role: 'ai',
+                        content: finalContent,
+                        timestamp: Date.now()
+                    });
+                    
+                    chat.updatedAt = new Date();
+                    this.updateChatList();
+                    this.saveChatToStorage(chat);
+                    this.saveChatList();
+                }
+            }
         }
         
         this.isTyping = false;
@@ -657,7 +1087,6 @@ class InternalChat {
         try {
             await navigator.clipboard.writeText(text);
             
-            // Visual feedback
             const originalContent = button.innerHTML;
             button.innerHTML = '<i class="bi bi-check"></i>';
             button.classList.add('text-success');
@@ -670,7 +1099,6 @@ class InternalChat {
         } catch (err) {
             console.error('Failed to copy text: ', err);
             
-            // Fallback for older browsers
             const textArea = document.createElement('textarea');
             textArea.value = text;
             document.body.appendChild(textArea);
@@ -679,7 +1107,6 @@ class InternalChat {
             try {
                 document.execCommand('copy');
                 
-                // Visual feedback
                 const originalContent = button.innerHTML;
                 button.innerHTML = '<i class="bi bi-check"></i>';
                 button.classList.add('text-success');
@@ -726,73 +1153,119 @@ class InternalChat {
             this.abortController = null;
         }
     }
-    
-    async loadChatHistory() {
-        try {
-            const response = await fetch('/api/chat/history');
-            if (response.ok) {
-                const data = await response.json();
-                if (data.messages && data.messages.length > 0) {
-                    // Hide welcome prompt if there are messages
-                    const welcomePrompt = document.getElementById('welcome-prompt');
-                    if (welcomePrompt) {
-                        welcomePrompt.style.display = 'none';
-                    }
-                    
-                    // Add each message
-                    data.messages.forEach(msg => {
-                        const files = msg.files || [];
-                        this.addMessage(msg.role, msg.content, false, files);
-                    });
-                    
-                    this.scrollToBottom();
-                }
-            }
-        } catch (error) {
-            console.error('Failed to load chat history:', error);
-        }
+}
+
+// Global functions for UI interactions
+function createNewChat() {
+    if (window.chat) {
+        window.chat.createNewChat();
     }
 }
 
-// Clear chat function
-async function clearAllHistory() {
-    if (!confirm('Are you sure you want to clear all chat history?')) {
+function clearCurrentChat() {
+    if (!window.chat || !window.chat.currentChatId) return;
+    
+    if (!confirm('Are you sure you want to clear this chat? This action cannot be undone.')) {
         return;
     }
     
-    try {
-        const response = await fetch('/api/chat/clear', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' }
-        });
+    const chat = window.chat.chats.get(window.chat.currentChatId);
+    if (chat) {
+        chat.messages = [];
+        chat.updatedAt = new Date();
         
-        if (response.ok) {
-            // Clear the UI
-            const messagesContainer = document.getElementById('messages-content');
-            const welcomePrompt = document.getElementById('welcome-prompt');
-            
-            if (messagesContainer) {
-                messagesContainer.innerHTML = '';
-            }
-            if (welcomePrompt) {
-                welcomePrompt.style.display = 'block';
-            }
-            
-            console.log('Chat history cleared');
-        } else {
-            throw new Error('Failed to clear chat history');
+        // Clear UI
+        const messagesContainer = document.getElementById('messages-content');
+        const welcomePrompt = document.getElementById('welcome-prompt');
+        
+        if (messagesContainer) {
+            messagesContainer.innerHTML = '';
         }
-    } catch (error) {
-        console.error('Error clearing chat:', error);
-        alert('Failed to clear chat history. Please try again.');
+        if (welcomePrompt) {
+            welcomePrompt.style.display = 'block';
+        }
+        
+        window.chat.updateChatList();
+        window.chat.saveChatToStorage(chat);
+        window.chat.saveChatList();
+        
+        console.log('Current chat cleared');
     }
 }
 
-// Clear all files function
+function refreshChatList() {
+    if (window.chat) {
+        window.chat.loadChatList();
+        window.chat.updateChatList();
+    }
+}
+
+function deleteAllChats() {
+    if (!window.chat) return;
+    
+    if (!confirm('Are you sure you want to delete ALL chats? This action cannot be undone.')) {
+        return;
+    }
+    
+    // Delete all chats from storage
+    window.chat.chats.forEach((chat, chatId) => {
+        window.chat.deleteChatFromStorage(chatId);
+    });
+    
+    // Clear chat list from localStorage
+    localStorage.removeItem('internal_chat_list');
+    
+    // Clear in-memory chats
+    window.chat.chats.clear();
+    window.chat.currentChatId = null;
+    
+    // Create a new chat
+    window.chat.createNewChat();
+    
+    console.log('All chats deleted');
+}
+
 function clearAllFiles() {
     if (window.chat) {
         window.chat.clearAllFiles();
     }
+}
+
+function renameChatConfirm() {
+    if (!window.chat || !window.chat.selectedChatForOptions) return;
+    
+    const newTitle = document.getElementById('rename-chat-input').value.trim();
+    if (!newTitle) {
+        alert('Please enter a valid chat name.');
+        return;
+    }
+    
+    window.chat.renameChat(window.chat.selectedChatForOptions, newTitle);
+    window.chat.chatOptionsModal.hide();
+    window.chat.selectedChatForOptions = null;
+}
+
+function duplicateChat() {
+    if (!window.chat || !window.chat.selectedChatForOptions) return;
+    
+    window.chat.duplicateChat(window.chat.selectedChatForOptions);
+    window.chat.chatOptionsModal.hide();
+    window.chat.selectedChatForOptions = null;
+}
+
+function deleteChatConfirm() {
+    if (!window.chat || !window.chat.selectedChatForOptions) return;
+    
+    const chat = window.chat.chats.get(window.chat.selectedChatForOptions);
+    if (!chat) return;
+    
+    if (!confirm(`Are you sure you want to delete "${chat.title}"? This action cannot be undone.`)) {
+        return;
+    }
+    
+    window.chat.deleteChat(window.chat.selectedChatForOptions);
+    window.chat.chatOptionsModal.hide();
+    window.chat.selectedChatForOptions = null;
 }
 
 // Initialize when DOM is loaded
