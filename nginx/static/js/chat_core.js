@@ -132,6 +132,7 @@ class InternalChat {
         this.fileUpload.clearAllFiles();
     }
     
+    // Updated loadChatMessages method in InternalChat class
     async loadChatMessages(chatId) {
         const messagesContainer = document.getElementById('messages-content');
         const welcomePrompt = document.getElementById('welcome-prompt');
@@ -179,7 +180,17 @@ class InternalChat {
                     
                     // Process with artifacts system using the Redis-provided ID
                     if (messageElement && msg.id) {
-                        const messageType = msg.role === 'user' ? 'in' : 'out';
+                        // Determine artifact type from the message ID format
+                        let messageType;
+                        if (msg.id.startsWith('admin(')) {
+                            messageType = 'admin';
+                        } else if (msg.id.startsWith('jai(')) {
+                            messageType = 'jai';
+                        } else {
+                            // Fallback to role-based detection
+                            messageType = msg.role === 'user' ? 'admin' : 'jai';
+                        }
+                        
                         this.artifacts.processMessageElement(
                             messageElement, 
                             messageType, 

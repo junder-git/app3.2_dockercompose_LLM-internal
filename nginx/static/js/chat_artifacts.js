@@ -1,171 +1,50 @@
 /**
- * Chat Artifacts System
- * Tracks all chat messages and code blocks with unique IDs for future reference
- * Format: in(n) / out(n) for messages, in(n)_code(x) / out(n)_code(x) for code blocks
+ * Chat Artifacts System - Redis Backend with admin(n)/jai(n) format
+ * Format: admin(n) / jai(n) for messages, admin(n)_code(x) / jai(n)_code(x) for code blocks
  */
 
 class ChatArtifacts {
     constructor() {
-        this.messageCounters = {
-            in: 0,   // User messages
-            out: 0   // AI messages
-        };
-        this.artifacts = new Map(); // Store all artifacts with metadata
         this.chatId = null; // Current chat ID
         this.init();
     }
     
     init() {
-        console.log('Chat Artifacts system initialized');
+        console.log('Chat Artifacts system initialized (Redis backend, admin/jai format)');
     }
     
     // Set current chat ID for artifact namespacing
     setChatId(chatId) {
         this.chatId = chatId;
-        // Reset counters for new chat or load existing counters
-        this.loadCountersForChat(chatId);
+        console.log('Chat artifacts system set to chat:', chatId);
     }
     
-    // Load or initialize counters for a specific chat
-    loadCountersForChat(chatId) {
-        const storageKey = `chat_artifacts_${chatId}`;
-        try {
-            const stored = localStorage.getItem(storageKey);
-            if (stored) {
-                const data = JSON.parse(stored);
-                this.messageCounters = data.counters || { in: 0, out: 0 };
-                
-                // Reload artifacts for this chat
-                this.loadArtifactsForChat(chatId);
-            } else {
-                // New chat, reset counters
-                this.messageCounters = { in: 0, out: 0 };
-            }
-        } catch (error) {
-            console.error('Error loading chat artifacts:', error);
-            this.messageCounters = { in: 0, out: 0 };
+    // Process message element and assign IDs (called by UI when message is loaded from Redis)
+    processMessageElement(messageElement, type, content, files = [], messageId = null) {
+        // Use provided messageId if available (from Redis), otherwise this shouldn't be called
+        if (!messageId) {
+            console.error('processMessageElement called without messageId - messages should be loaded from Redis');
+            return null;
         }
-    }
-    
-    // Load artifacts from storage for a specific chat
-    loadArtifactsForChat(chatId) {
-        const storageKey = `chat_artifacts_${chatId}`;
-        try {
-            const stored = localStorage.getItem(storageKey);
-            if (stored) {
-                const data = JSON.parse(stored);
-                if (data.artifacts) {
-                    this.artifacts.clear();
-                    Object.entries(data.artifacts).forEach(([id, artifact]) => {
-                        this.artifacts.set(id, artifact);
-                    });
-                }
-            }
-        } catch (error) {
-            console.error('Error loading artifacts for chat:', error);
-        }
-    }
-    
-    // Save artifacts and counters to storage
-    saveArtifactsForChat() {
-        if (!this.chatId) return;
-        
-        const storageKey = `chat_artifacts_${this.chatId}`;
-        const data = {
-            counters: this.messageCounters,
-            artifacts: Object.fromEntries(this.artifacts)
-        };
-        
-        try {
-            localStorage.setItem(storageKey, JSON.stringify(data));
-        } catch (error) {
-            console.error('Error saving chat artifacts:', error);
-        }
-    }
-    
-    // Generate next message ID
-    getNextMessageId(type) {
-        if (!['in', 'out'].includes(type)) {
-            throw new Error('Invalid message type. Must be "in" or "out"');
-        }
-        
-        this.messageCounters[type]++;
-        const messageId = `${type}(${this.messageCounters[type]})`;
-        
-        // Save updated counters
-        this.saveArtifactsForChat();
-        
-        return messageId;
-    }
-    
-    // Generate code block ID with parent message ID
-    getCodeBlockId(parentMessageId, codeBlockIndex) {
-        return `${parentMessageId}_code(${codeBlockIndex})`;
-    }
-    
-    // Add message artifact
-    addMessageArtifact(messageId, content, type, files = [], metadata = {}) {
-        const artifact = {
-            id: messageId,
-            type: type, // 'in' or 'out'
-            content: content,
-            files: files,
-            timestamp: Date.now(),
-            chatId: this.chatId,
-            metadata: metadata,
-            codeBlocks: []
-        };
-        
-        this.artifacts.set(messageId, artifact);
-        this.saveArtifactsForChat();
-        
-        return artifact;
-    }
-    
-    // Add code block artifact
-    addCodeBlockArtifact(parentMessageId, codeBlockId, code, language = '', metadata = {}) {
-        const artifact = {
-            id: codeBlockId,
-            parentId: parentMessageId,
-            type: 'code_block',
-            code: code,
-            language: language,
-            timestamp: Date.now(),
-            chatId: this.chatId,
-            metadata: metadata
-        };
-        
-        // Add to main artifacts map
-        this.artifacts.set(codeBlockId, artifact);
-        
-        // Add to parent message's code blocks array
-        const parentArtifact = this.artifacts.get(parentMessageId);
-        if (parentArtifact) {
-            parentArtifact.codeBlocks.push(codeBlockId);
-        }
-        
-        this.saveArtifactsForChat();
-        return artifact;
-    }
-    
-    // Process message element and assign IDs
-    processMessageElement(messageElement, type, content, files = []) {
-        const messageId = this.getNextMessageId(type);
         
         // Add ID to message element
         messageElement.setAttribute('data-artifact-id', messageId);
-        messageElement.setAttribute('data-artifact-type', type);
+        messageElement.setAttribute('data-artifact-type', this.getArtifactTypeFromId(messageId));
         
         // Add visible ID badge to message
-        this.addIdBadgeToMessage(messageElement, messageId, type);
+        this.addIdBadgeToMessage(messageElement, messageId, this.getArtifactTypeFromId(messageId));
         
-        // Create message artifact
-        this.addMessageArtifact(messageId, content, type, files);
-        
-        // Process code blocks within the message
+        // Process code blocks within the message (artifacts should already exist in Redis)
         this.processCodeBlocksInMessage(messageElement, messageId);
         
         return messageId;
+    }
+    
+    // Get artifact type from message ID (admin -> admin, jai -> jai)
+    getArtifactTypeFromId(messageId) {
+        if (messageId.startsWith('admin(')) return 'admin';
+        if (messageId.startsWith('jai(')) return 'jai';
+        return 'unknown';
     }
     
     // Add visible ID badge to message
@@ -192,17 +71,13 @@ class ChatArtifacts {
         }
     }
     
-    // Process code blocks within a message
+    // Process code blocks within a message (artifacts already exist in Redis)
     processCodeBlocksInMessage(messageElement, parentMessageId) {
         const codeBlocks = messageElement.querySelectorAll('pre code');
         
         codeBlocks.forEach((codeElement, index) => {
             const codeBlockIndex = index + 1;
             const codeBlockId = this.getCodeBlockId(parentMessageId, codeBlockIndex);
-            
-            // Get code content and language
-            const code = codeElement.textContent || codeElement.innerText;
-            const language = this.extractLanguageFromCodeBlock(codeElement);
             
             // Add ID to code block elements
             const preElement = codeElement.closest('pre');
@@ -213,11 +88,13 @@ class ChatArtifacts {
                 
                 // Add visible ID badge to code block
                 this.addIdBadgeToCodeBlock(preElement, codeBlockId);
-                
-                // Create code block artifact
-                this.addCodeBlockArtifact(parentMessageId, codeBlockId, code, language);
             }
         });
+    }
+    
+    // Generate code block ID with parent message ID
+    getCodeBlockId(parentMessageId, codeBlockIndex) {
+        return `${parentMessageId}_code(${codeBlockIndex})`;
     }
     
     // Add visible ID badge to code block
@@ -262,20 +139,6 @@ class ChatArtifacts {
         preElement.appendChild(idBadge);
     }
     
-    // Extract language from code block
-    extractLanguageFromCodeBlock(codeElement) {
-        // Try to get language from class attribute (Prism.js format)
-        const classes = codeElement.className.split(' ');
-        for (const cls of classes) {
-            if (cls.startsWith('language-')) {
-                return cls.replace('language-', '');
-            }
-        }
-        
-        // Try to get from data attributes
-        return codeElement.getAttribute('data-language') || '';
-    }
-    
     // Show copy feedback
     showCopyFeedback(element) {
         const originalText = element.textContent;
@@ -307,42 +170,75 @@ class ChatArtifacts {
         document.body.removeChild(textArea);
     }
     
-    // Get artifact by ID
-    getArtifact(artifactId) {
-        return this.artifacts.get(artifactId);
+    // API Methods for Redis backend
+    
+    // Get all artifacts for current chat from Redis
+    async getAllArtifacts() {
+        if (!this.chatId) return [];
+        
+        try {
+            const response = await fetch(`/api/chat/artifacts?chat_id=${this.chatId}`);
+            if (response.ok) {
+                const data = await response.json();
+                return data.artifacts || [];
+            }
+        } catch (error) {
+            console.error('Failed to fetch artifacts:', error);
+        }
+        return [];
     }
     
-    // Get all artifacts for current chat
-    getAllArtifacts() {
-        return Array.from(this.artifacts.values())
-            .filter(artifact => artifact.chatId === this.chatId);
+    // Get message details including artifacts from Redis
+    async getMessageDetails(messageId) {
+        if (!this.chatId || !messageId) return null;
+        
+        try {
+            const response = await fetch(`/api/message/details?chat_id=${this.chatId}&message_id=${messageId}`);
+            if (response.ok) {
+                return await response.json();
+            }
+        } catch (error) {
+            console.error('Failed to fetch message details:', error);
+        }
+        return null;
+    }
+    
+    // Get artifact by ID from Redis
+    async getArtifact(artifactId) {
+        const artifacts = await this.getAllArtifacts();
+        return artifacts.find(artifact => artifact.id === artifactId) || null;
     }
     
     // Get all message artifacts
-    getMessageArtifacts() {
-        return this.getAllArtifacts()
-            .filter(artifact => artifact.type === 'in' || artifact.type === 'out')
+    async getMessageArtifacts() {
+        const allArtifacts = await this.getAllArtifacts();
+        return allArtifacts
+            .filter(artifact => artifact.type === 'admin' || artifact.type === 'jai')
             .sort((a, b) => a.timestamp - b.timestamp);
     }
     
     // Get all code block artifacts
-    getCodeBlockArtifacts() {
-        return this.getAllArtifacts()
+    async getCodeBlockArtifacts() {
+        const allArtifacts = await this.getAllArtifacts();
+        return allArtifacts
             .filter(artifact => artifact.type === 'code_block')
             .sort((a, b) => a.timestamp - b.timestamp);
     }
     
     // Get code blocks for a specific message
-    getCodeBlocksForMessage(messageId) {
-        return this.getAllArtifacts()
-            .filter(artifact => artifact.type === 'code_block' && artifact.parentId === messageId)
+    async getCodeBlocksForMessage(messageId) {
+        const allArtifacts = await this.getAllArtifacts();
+        return allArtifacts
+            .filter(artifact => artifact.type === 'code_block' && artifact.parent_id === messageId)
             .sort((a, b) => a.id.localeCompare(b.id)); // Sort by ID to maintain order
     }
     
     // Search artifacts by content
-    searchArtifacts(query, type = null) {
+    async searchArtifacts(query, type = null) {
         const lowerQuery = query.toLowerCase();
-        return this.getAllArtifacts()
+        const allArtifacts = await this.getAllArtifacts();
+        
+        return allArtifacts
             .filter(artifact => {
                 if (type && artifact.type !== type) return false;
                 
@@ -354,99 +250,62 @@ class ChatArtifacts {
     }
     
     // Export artifacts for current chat
-    exportArtifacts() {
-        const artifacts = this.getAllArtifacts();
+    async exportArtifacts() {
+        const artifacts = await this.getAllArtifacts();
         const exportData = {
             chatId: this.chatId,
             timestamp: Date.now(),
-            counters: this.messageCounters,
             artifacts: artifacts
         };
         
         return JSON.stringify(exportData, null, 2);
     }
     
-    // Clear artifacts for current chat
-    clearArtifacts() {
-        if (!this.chatId) return;
-        
-        // Remove artifacts for current chat
-        const artifactsToRemove = Array.from(this.artifacts.keys())
-            .filter(id => {
-                const artifact = this.artifacts.get(id);
-                return artifact && artifact.chatId === this.chatId;
-            });
-        
-        artifactsToRemove.forEach(id => this.artifacts.delete(id));
-        
-        // Reset counters
-        this.messageCounters = { in: 0, out: 0 };
-        
-        // Clear from storage
-        const storageKey = `chat_artifacts_${this.chatId}`;
-        localStorage.removeItem(storageKey);
-    }
-    
-    // Get next available ID (for reference)
-    getNextAvailableId(type) {
-        return `${type}(${this.messageCounters[type] + 1})`;
-    }
-    
-    // Get current counters
-    getCurrentCounters() {
-        return { ...this.messageCounters };
-    }
-    
     // Get artifact statistics
-    getStats() {
-        const allArtifacts = this.getAllArtifacts();
+    async getStats() {
+        const allArtifacts = await this.getAllArtifacts();
         return {
             total: allArtifacts.length,
-            messages: allArtifacts.filter(a => a.type === 'in' || a.type === 'out').length,
-            userMessages: allArtifacts.filter(a => a.type === 'in').length,
-            aiMessages: allArtifacts.filter(a => a.type === 'out').length,
+            messages: allArtifacts.filter(a => a.type === 'admin' || a.type === 'jai').length,
+            adminMessages: allArtifacts.filter(a => a.type === 'admin').length,
+            jaiMessages: allArtifacts.filter(a => a.type === 'jai').length,
             codeBlocks: allArtifacts.filter(a => a.type === 'code_block').length
         };
     }
     
-    // Import artifacts from export data
-    importArtifacts(exportData) {
+    // Clear artifacts for current chat (calls Redis API)
+    async clearArtifacts() {
+        if (!this.chatId) return false;
+        
         try {
-            const data = typeof exportData === 'string' ? JSON.parse(exportData) : exportData;
+            const response = await fetch('/api/chat/clear', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ chat_id: this.chatId })
+            });
             
-            if (data.chatId && data.artifacts) {
-                this.chatId = data.chatId;
-                this.messageCounters = data.counters || { in: 0, out: 0 };
-                
-                this.artifacts.clear();
-                data.artifacts.forEach(artifact => {
-                    this.artifacts.set(artifact.id, artifact);
-                });
-                
-                this.saveArtifactsForChat();
-                return true;
-            }
+            return response.ok;
         } catch (error) {
-            console.error('Error importing artifacts:', error);
+            console.error('Failed to clear artifacts:', error);
             return false;
         }
-        
-        return false;
     }
     
-    // Validate artifact ID format
+    // Validate artifact ID format (updated for admin/jai)
     static isValidArtifactId(id) {
-        // Message ID format: in(n) or out(n)
-        const messagePattern = /^(in|out)\(\d+\)$/;
-        // Code block ID format: in(n)_code(x) or out(n)_code(x)
-        const codePattern = /^(in|out)\(\d+\)_code\(\d+\)$/;
+        // Message ID format: admin(n) or jai(n)
+        const messagePattern = /^(admin|jai)\(\d+\)$/;
+        // Code block ID format: admin(n)_code(x) or jai(n)_code(x)
+        const codePattern = /^(admin|jai)\(\d+\)_code\(\d+\)$/;
         
         return messagePattern.test(id) || codePattern.test(id);
     }
     
-    // Parse artifact ID to get components
+    // Parse artifact ID to get components (updated for admin/jai)
     static parseArtifactId(id) {
-        const messageMatch = id.match(/^(in|out)\((\d+)\)$/);
+        const messageMatch = id.match(/^(admin|jai)\((\d+)\)$/);
         if (messageMatch) {
             return {
                 type: messageMatch[1],
@@ -455,7 +314,7 @@ class ChatArtifacts {
             };
         }
         
-        const codeMatch = id.match(/^(in|out)\((\d+)\)_code\((\d+)\)$/);
+        const codeMatch = id.match(/^(admin|jai)\((\d+)\)_code\((\d+)\)$/);
         if (codeMatch) {
             return {
                 type: codeMatch[1],

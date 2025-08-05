@@ -1,4 +1,4 @@
-// Artifact panel functionality - Redis Backend
+// Artifact panel functionality - Redis Backend with admin/jai format
 class ChatArtifactsPanel {
     constructor() {
         this.modal = null;
@@ -11,7 +11,7 @@ class ChatArtifactsPanel {
             this.modal = new bootstrap.Modal(document.getElementById('artifactPanelModal'));
             this.setupEventListeners();
         });
-        console.log('Chat Artifacts Panel initialized (Redis backend)');
+        console.log('Chat Artifacts Panel initialized (Redis backend, admin/jai format)');
     }
     
     setupEventListeners() {
@@ -62,8 +62,8 @@ class ChatArtifactsPanel {
             const codeElement = document.getElementById('code-blocks');
             
             if (totalElement) totalElement.textContent = stats.messages || 0;
-            if (userElement) userElement.textContent = stats.userMessages || 0;
-            if (aiElement) aiElement.textContent = stats.aiMessages || 0;
+            if (userElement) userElement.textContent = stats.adminMessages || 0;
+            if (aiElement) aiElement.textContent = stats.jaiMessages || 0;
             if (codeElement) codeElement.textContent = stats.codeBlocks || 0;
         } catch (error) {
             console.error('Error updating artifact stats:', error);
@@ -172,21 +172,21 @@ class ChatArtifactsPanel {
         return item;
     }
     
-    // Get icon for artifact type
+    // Get icon for artifact type (updated for admin/jai)
     getArtifactTypeIcon(type) {
         switch (type) {
-            case 'in': return 'bi-arrow-right-circle-fill text-primary';
-            case 'out': return 'bi-arrow-left-circle-fill text-success';
+            case 'admin': return 'bi-person-circle-fill text-primary';
+            case 'jai': return 'bi-robot text-success';
             case 'code_block': return 'bi-code-square text-warning';
             default: return 'bi-question-circle';
         }
     }
     
-    // Get label for artifact type
+    // Get label for artifact type (updated for admin/jai)
     getArtifactTypeLabel(type) {
         switch (type) {
-            case 'in': return 'User';
-            case 'out': return 'AI';
+            case 'admin': return 'Admin';
+            case 'jai': return 'JAI';
             case 'code_block': return 'Code';
             default: return 'Unknown';
         }

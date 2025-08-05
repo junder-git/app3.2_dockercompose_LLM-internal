@@ -178,22 +178,16 @@
                         <div class="col-md-6">
                             <input type="text" class="form-control" id="artifact-search" placeholder="Search artifacts...">
                         </div>
-                        <div class="col-md-3">
-                            <select class="form-select" id="artifact-type-filter">
-                                <option value="">All Types</option>
-                                <option value="in">User Messages (in)</option>
-                                <option value="out">AI Messages (out)</option>
-                                <option value="code_block">Code Blocks</option>
-                            </select>
-                        </div>
-                        <div class="col-md-3">
-                            <button class="btn btn-primary w-100" onclick="refreshArtifactPanel()">
-                                <i class="bi bi-arrow-clockwise"></i> Refresh
-                            </button>
-                        </div>
+                        <!-- Updated artifact type filter in the modal -->
+                    <div class="col-md-3">
+                        <select class="form-select" id="artifact-type-filter">
+                            <option value="">All Types</option>
+                            <option value="admin">Admin Messages (admin)</option>
+                            <option value="jai">JAI Messages (jai)</option>
+                            <option value="code_block">Code Blocks</option>
+                        </select>
                     </div>
-                    
-                    <!-- Artifact stats -->
+                    <!-- Updated stats cards -->
                     <div class="row mb-3">
                         <div class="col-md-3">
                             <div class="card text-center">
@@ -206,7 +200,7 @@
                         <div class="col-md-3">
                             <div class="card text-center">
                                 <div class="card-body">
-                                    <h6 class="card-title">User Messages</h6>
+                                    <h6 class="card-title">Admin Messages</h6>
                                     <h4 id="user-messages" class="text-info">0</h4>
                                 </div>
                             </div>
@@ -214,7 +208,7 @@
                         <div class="col-md-3">
                             <div class="card text-center">
                                 <div class="card-body">
-                                    <h6 class="card-title">AI Messages</h6>
+                                    <h6 class="card-title">JAI Messages</h6>
                                     <h4 id="ai-messages" class="text-success">0</h4>
                                 </div>
                             </div>
@@ -228,7 +222,6 @@
                             </div>
                         </div>
                     </div>
-                    
                     <!-- Artifact list -->
                     <div class="artifact-list" id="artifact-list" style="max-height: 400px; overflow-y: auto;">
                         <div class="text-center text-muted p-3">

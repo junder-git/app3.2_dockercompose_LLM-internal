@@ -39,15 +39,17 @@ local function format_files_for_context(files)
     return file_context
 end
 
--- Generate message ID using the exact format the UI expects: in(n) or out(n)
+-- Generate message ID using admin(n) and jai(n) format
 local function generate_message_id(redis, chat_id, message_type)
-    local counter_key = "chat:counter:" .. USER_ID .. ":" .. chat_id .. ":" .. message_type
+    -- Convert user/ai to admin/jai
+    local id_type = message_type == "user" and "admin" or "jai"
+    local counter_key = "chat:counter:" .. USER_ID .. ":" .. chat_id .. ":" .. id_type
     local counter = redis:incr(counter_key)
     redis:expire(counter_key, 86400 * 365) -- Expire after 1 year
-    return message_type .. "(" .. counter .. ")"
+    return id_type .. "(" .. counter .. ")"
 end
 
--- Generate artifact ID for code blocks using exact UI format: in(n)_code(x) or out(n)_code(x)
+-- Generate artifact ID for code blocks using admin(n)_code(x) or jai(n)_code(x)
 local function generate_artifact_id(parent_message_id, code_block_index)
     return parent_message_id .. "_code(" .. code_block_index .. ")"
 end
@@ -315,6 +317,29 @@ function _M.handle_chat_artifacts()
         end
     end
     
+    -- Also include message artifacts (admin/jai messages themselves)
+    local messages = get_chat_messages(redis, chat_id, 1000)
+    for _, message in ipairs(messages) do
+        -- Determine artifact type from message ID
+        local artifact_type = "unknown"
+        if message.id and message.id:match("^admin%(") then
+            artifact_type = "admin"
+        elseif message.id and message.id:match("^jai%(") then
+            artifact_type = "jai"
+        end
+        
+        if artifact_type ~= "unknown" then
+            table.insert(artifacts, {
+                id = message.id,
+                type = artifact_type,
+                content = message.content,
+                files = message.files or {},
+                timestamp = message.timestamp,
+                chat_id = message.chat_id
+            })
+        end
+    end
+    
     redis_client.close(redis)
     ngx.say(cjson.encode({artifacts = artifacts}))
 end
@@ -401,8 +426,8 @@ function _M.handle_clear_chat()
     local chat_messages_key = "chat:messages:" .. USER_ID .. ":" .. chat_id
     local chat_artifacts_key = "chat:artifacts:" .. USER_ID .. ":" .. chat_id
     local chat_meta_key = "chat:meta:" .. USER_ID .. ":" .. chat_id
-    local counter_in_key = "chat:counter:" .. USER_ID .. ":" .. chat_id .. ":in"
-    local counter_out_key = "chat:counter:" .. USER_ID .. ":" .. chat_id .. ":out"
+    local counter_admin_key = "chat:counter:" .. USER_ID .. ":" .. chat_id .. ":admin"
+    local counter_jai_key = "chat:counter:" .. USER_ID .. ":" .. chat_id .. ":jai"
     
     -- Get all message and artifact IDs to delete individual records
     local message_ids = redis:lrange(chat_messages_key, 0, -1)
@@ -428,8 +453,8 @@ function _M.handle_clear_chat()
     redis:del(chat_messages_key)
     redis:del(chat_artifacts_key)
     redis:del(chat_meta_key)
-    redis:del(counter_in_key)
-    redis:del(counter_out_key)
+    redis:del(counter_admin_key)
+    redis:del(counter_jai_key)
     
     redis_client.close(redis)
     ngx.say(cjson.encode({success = true}))
@@ -474,8 +499,8 @@ function _M.handle_delete_chat()
     local chat_messages_key = "chat:messages:" .. USER_ID .. ":" .. chat_id
     local chat_artifacts_key = "chat:artifacts:" .. USER_ID .. ":" .. chat_id
     local chat_meta_key = "chat:meta:" .. USER_ID .. ":" .. chat_id
-    local counter_in_key = "chat:counter:" .. USER_ID .. ":" .. chat_id .. ":in"
-    local counter_out_key = "chat:counter:" .. USER_ID .. ":" .. chat_id .. ":out"
+    local counter_admin_key = "chat:counter:" .. USER_ID .. ":" .. chat_id .. ":admin"
+    local counter_jai_key = "chat:counter:" .. USER_ID .. ":" .. chat_id .. ":jai"
     
     local message_ids = redis:lrange(chat_messages_key, 0, -1)
     local artifact_ids = redis:lrange(chat_artifacts_key, 0, -1)
@@ -502,8 +527,8 @@ function _M.handle_delete_chat()
     deleted_items = deleted_items + redis:del(chat_messages_key)
     deleted_items = deleted_items + redis:del(chat_artifacts_key)
     deleted_items = deleted_items + redis:del(chat_meta_key)
-    deleted_items = deleted_items + redis:del(counter_in_key)
-    deleted_items = deleted_items + redis:del(counter_out_key)
+    deleted_items = deleted_items + redis:del(counter_admin_key)
+    deleted_items = deleted_items + redis:del(counter_jai_key)
     
     redis_client.close(redis)
     
@@ -609,8 +634,8 @@ function _M.handle_chat_stream()
         return
     end
     
-    -- Generate user message ID and save it
-    local user_message_id = generate_message_id(redis, chat_id, "in")
+    -- Generate admin message ID and save it
+    local user_message_id = generate_message_id(redis, chat_id, "user")
     local complete_message = user_message
     local file_context = format_files_for_context(files)
     
@@ -711,8 +736,8 @@ function _M.handle_chat_stream()
     ngx.say("data: [DONE]\n\n")
     ngx.flush()
     
-    -- Generate AI message ID and save response with artifacts
-    local ai_message_id = generate_message_id(redis, chat_id, "out")
+    -- Generate JAI message ID and save response with artifacts
+    local ai_message_id = generate_message_id(redis, chat_id, "ai")
     
     -- Extract and save code blocks as artifacts
     local artifacts = extract_and_save_code_blocks(redis, chat_id, ai_message_id, full_response)
@@ -724,4 +749,17 @@ function _M.handle_chat_stream()
     httpc:close()
 end
 
-return _M
+return _M-- Generate message ID using admin(n) and jai(n) format
+local function generate_message_id(redis, chat_id, message_type)
+    -- Convert user/ai to admin/jai
+    local id_type = message_type == "user" and "admin" or "jai"
+    local counter_key = "chat:counter:" .. USER_ID .. ":" .. chat_id .. ":" .. id_type
+    local counter = redis:incr(counter_key)
+    redis:expire(counter_key, 86400 * 365) -- Expire after 1 year
+    return id_type .. "(" .. counter .. ")"
+end
+
+-- Generate artifact ID for code blocks using admin(n)_code(x) or jai(n)_code(x)
+local function generate_artifact_id(parent_message_id, code_block_index)
+    return parent_message_id .. "_code(" .. code_block_index .. ")"
+end
