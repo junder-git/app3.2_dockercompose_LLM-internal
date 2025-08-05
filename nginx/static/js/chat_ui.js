@@ -534,27 +534,7 @@ class ChatUI {
                 <div class="message-time">${Date.now()}</div>
             </div>
             <div class="message-content"></div>
-        `;
-        // Header
-        const headerDiv = document.createElement('div');
-        headerDiv.className = 'message-header';
-        
-        const avatarDiv = document.createElement('div');
-        avatarDiv.className = 'message-avatar';
-        
-        const labelSpan = document.createElement('span');
-        
-        if (sender === 'user') {
-            avatarDiv.innerHTML = '<i class="bi bi-person-circle"></i>';
-            labelSpan.textContent = 'You';
-        } else {
-            avatarDiv.innerHTML = '<i class="bi bi-robot"></i>';
-            labelSpan.textContent = 'AI Assistant';
-        }
-        
-        headerDiv.appendChild(avatarDiv);
-        headerDiv.appendChild(labelSpan);
-        
+        `;       
         // Files (for user messages)
         if (files && files.length > 0) {
             const filesDiv = document.createElement('div');
