@@ -1,21 +1,15 @@
 FROM ollama/ollama:latest
 
-# Set environment variables
-ENV OLLAMA_HOST=0.0.0.0:11434
-ENV OLLAMA_ORIGINS=*
-
-# Create scripts directory
-RUN mkdir -p /scripts
-
-# Copy initialization script
-COPY scripts/init-ollama.sh /scripts/init-ollama.sh
-RUN chmod +x /scripts/init-ollama.sh
-
-# Create models directory
+# Create necessary directories
 RUN mkdir -p /root/.ollama/models
+RUN mkdir -p /root/.ollama/scripts
 
-# Expose port
-EXPOSE 11434
+# Copy the initialization script and make it executable
+COPY scripts/init-ollama.sh /root/.ollama/scripts/init-ollama.sh
+RUN chmod +x /root/.ollama/scripts/init-ollama.sh
 
-# Start Ollama with initialization
-CMD ["/scripts/init-ollama.sh"]
+# Copy the Modelfile template
+#COPY scripts/Modelfile /root/.ollama/scripts/Modelfile
+
+# Set the entrypoint to our initialization script
+ENTRYPOINT ["/root/.ollama/scripts/init-ollama.sh"]
