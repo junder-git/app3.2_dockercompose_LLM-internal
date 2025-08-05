@@ -749,17 +749,4 @@ function _M.handle_chat_stream()
     httpc:close()
 end
 
-return _M-- Generate message ID using admin(n) and jai(n) format
-local function generate_message_id(redis, chat_id, message_type)
-    -- Convert user/ai to admin/jai
-    local id_type = message_type == "user" and "admin" or "jai"
-    local counter_key = "chat:counter:" .. USER_ID .. ":" .. chat_id .. ":" .. id_type
-    local counter = redis:incr(counter_key)
-    redis:expire(counter_key, 86400 * 365) -- Expire after 1 year
-    return id_type .. "(" .. counter .. ")"
-end
-
--- Generate artifact ID for code blocks using admin(n)_code(x) or jai(n)_code(x)
-local function generate_artifact_id(parent_message_id, code_block_index)
-    return parent_message_id .. "_code(" .. code_block_index .. ")"
-end
+return _M
