@@ -1,7 +1,7 @@
 services:
-  ollama:
+  internal-ollama:
     build: ./ollama
-    container_name: devstral-ollama
+    container_name: internal-devstral-ollama
     privileged: true
     environment:
       - OLLAMA_HOST=${OLLAMA_HOST}
@@ -48,9 +48,9 @@ services:
             - capabilities: [gpu]
     restart: unless-stopped
 
-  redis:
+  internal-redis:
     build: ./redis
-    container_name: devstral-redis
+    container_name: internal-devstral-redis
     ports:
       - "6379:6379"
     volumes:
@@ -68,9 +68,9 @@ services:
           memory: ${REDIS_MEMORY}
     restart: unless-stopped
 
-  nginx:
+  internal-nginx:
     build: ./nginx
-    container_name: devstral-nginx
+    container_name: internal-devstral-nginx
     ports:
       - "443:443"
     environment:
