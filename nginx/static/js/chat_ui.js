@@ -637,6 +637,7 @@ class ChatUI {
                 this.updateChatList();
             }
         }
-        return this.chatInstance.loadChatMessages(this.chatInstance.currentChatId)
+        this.chatInstance.loadChatMessages(this.chatInstance.currentChatId)
+        return messageElement
     }
 }
