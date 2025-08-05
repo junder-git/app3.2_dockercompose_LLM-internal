@@ -20,6 +20,15 @@ class ChatUI {
         }
     }
     
+    updateCharCount() {
+        const textarea = document.getElementById('chat-input');
+        const countEl = document.getElementById('char-count');
+        
+        if (textarea && countEl) {
+            countEl.textContent = textarea.value.length;
+        }
+    }
+    
     autoResizeTextarea() {
         const textarea = document.getElementById('chat-input');
         if (textarea) {
