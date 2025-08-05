@@ -559,19 +559,6 @@ class ChatUI {
         // Content
         const contentDiv = document.createElement('div');
         contentDiv.className = 'message-content';
-        
-        if (sender === 'user') {
-            contentDiv.innerHTML = window.marked ? marked.parse(content) : content;
-        } else if (isStreaming) {
-            const streamDiv = document.createElement('div');
-            streamDiv.className = 'streaming-content';
-            contentDiv.appendChild(streamDiv);
-        } else {
-            contentDiv.innerHTML = window.marked ? marked.parse(content) : content;
-            this.enhanceCodeBlocks(contentDiv, content);
-        }
-        
-        messageDiv.appendChild(contentDiv);
         messagesContainer.appendChild(messageDiv);
         
         // Process with artifacts system if not streaming
