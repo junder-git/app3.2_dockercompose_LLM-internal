@@ -190,8 +190,7 @@ class InternalChat {
         // Prepare message - delegate to Ollama for formatting
         const { messageContent, filesToSend } = this.ollama.prepareMessage(message, this.fileUpload.attachedFiles);
         // Add user message to UI
-        this.ui.addMessage('user', messageContent, false, filesToSend);
-        //this.ui.addMessageFromRedis(messageContent)
+        //this.ui.addMessage('user', messageContent, false, filesToSend);
         
         // Clear input and files
         input.value = '';
@@ -215,7 +214,7 @@ class InternalChat {
             }
             
             if (stream.content) {
-                this.ui.addMessage('assistant', stream.content, false);
+                //this.ui.addMessage('assistant', stream.content, false);
                 this.ui.updateCurrentChatTitle(this.ollama.generateTitle(message));
             }
             

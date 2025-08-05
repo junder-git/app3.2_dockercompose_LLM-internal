@@ -635,10 +635,9 @@ class ChatUI {
                 }
                 
                 this.updateChatList();
-                this.renderChatMessages();
             }
         }
-        this.scrollToBottom();
+        this.renderChatMessages();
         return messageDiv;
     }
 }
