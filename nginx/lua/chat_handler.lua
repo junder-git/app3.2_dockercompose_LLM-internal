@@ -125,9 +125,13 @@ function _M.handle_chat_stream()
         context_messages = {}
     end
     
-    -- Save user message to Redis
-    local user_message_id = utils.generate_message_id(redis, chat_id, "user")
-    local save_result, save_err = redis.save_message(chat_id, user_message_id, "user", user_message, processed_files, {})
+    -- Save user message to Redis - FIXED: Use Redis execute pattern
+    local user_message_id
+    local save_result, save_err = redis.execute(function(red)
+        user_message_id = utils.generate_message_id(red, chat_id, "user")
+        return redis.save_message(chat_id, user_message_id, "user", user_message, processed_files, {})
+    end)
+    
     if not save_result then
         utils.log_error("chat_handler", "save_user_message", "Failed to save user message", {
             error = save_err,
@@ -153,11 +157,14 @@ function _M.handle_chat_stream()
         return
     end
     
-    -- Save AI response and extract artifacts
-    local ai_message_id = utils.generate_message_id(redis, chat_id, "assistant")
-    local artifact_ids = artifacts.extract_and_save_code_blocks(redis, chat_id, ai_message_id, ai_response)
+    -- Save AI response and extract artifacts - FIXED: Use Redis execute pattern
+    local ai_message_id
+    local ai_save_result, ai_save_err = redis.execute(function(red)
+        ai_message_id = utils.generate_message_id(red, chat_id, "assistant")
+        local artifact_ids = artifacts.extract_and_save_code_blocks(red, chat_id, ai_message_id, ai_response)
+        return redis.save_message(chat_id, ai_message_id, "assistant", ai_response, {}, artifact_ids)
+    end)
     
-    local ai_save_result, ai_save_err = redis.save_message(chat_id, ai_message_id, "assistant", ai_response, {}, artifact_ids)
     if not ai_save_result then
         utils.log_error("chat_handler", "save_ai_message", "Failed to save AI message", {
             error = ai_save_err,
@@ -165,11 +172,19 @@ function _M.handle_chat_stream()
             message_id = ai_message_id
         })
     else
+        -- Get artifact count for logging (this is a bit of a workaround)
+        local artifact_count = 0
+        if ai_response then
+            for _ in string.gmatch(ai_response, "```[%w]*\n.-\n```") do
+                artifact_count = artifact_count + 1
+            end
+        end
+        
         utils.log_info("chat_handler", "chat_stream_complete", {
             chat_id = chat_id,
             user_message_id = user_message_id,
             ai_message_id = ai_message_id,
-            artifact_count = #artifact_ids,
+            artifact_count = artifact_count,
             response_length = #ai_response
         })
     end

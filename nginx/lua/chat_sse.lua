@@ -287,13 +287,17 @@ function _M.stream_compressed(content)
     _M.send_content_chunk(content)
 end
 
--- Validate SSE connection
+-- FIXED: More lenient SSE connection validation
 function _M.validate_connection()
     local accept = ngx.var.http_accept or ""
     local user_agent = ngx.var.http_user_agent or ""
     
-    -- Check if client accepts event-stream
-    if not string.find(accept, "text/event-stream") and not string.find(accept, "*/*") then
+    -- FIXED: More permissive check - accept if client explicitly requests event-stream OR sends */*
+    local accepts_sse = string.find(accept, "text/event%-stream") or 
+                       string.find(accept, "%*/%*") or
+                       accept == "" -- Some clients don't send Accept header
+    
+    if not accepts_sse then
         utils.log_error("chat_sse", "validate_connection", "Client doesn't accept event-stream", {
             accept = accept,
             user_agent = user_agent

@@ -32,7 +32,8 @@ class ChatOllama {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Accept': 'text/event-stream'
+                    'Accept': 'text/event-stream',  // FIXED: Added proper SSE Accept header
+                    'Cache-Control': 'no-cache'     // FIXED: Added cache control
                 },
                 body: JSON.stringify(requestBody),
                 signal: this.abortController.signal
@@ -268,18 +269,6 @@ class ChatOllama {
     // Generate title from message
     generateTitle(message) {
         return message.length > 30 ? message.substring(0, 30) + '...' : message;
-    }
-
-    // Stop current streaming (enhanced)
-    stopStream() {
-        if (this.abortController && this.isStreaming) {
-            console.log('Ollama: Stopping stream');
-            this.abortController.abort();
-            this.isStreaming = false;
-            this.abortController = null;
-            return true;
-        }
-        return false;
     }
     
     // Error classification

@@ -1,7 +1,9 @@
-// Artifact panel functionality - Redis Backend with admin/jai format - FIXED VERSION
+// FIXED Artifact panel functionality - Redis Backend with admin/jai format
 class ChatArtifactsPanel {
     constructor() {
         this.modal = null;
+        this.currentCodeArtifact = null;
+        this.keyboardHandler = null;
         this.init();
     }
     
@@ -36,133 +38,181 @@ class ChatArtifactsPanel {
         }
     }
     
-    // Refresh artifact panel data from Redis
+    // FIXED: Refresh artifact panel data from Redis with better error handling
     async refresh() {
-        if (!window.chat || !window.chat.artifacts) return;
+        if (!window.chat || !window.chat.currentChatId) {
+            console.warn('🔍 No current chat ID available for artifacts');
+            return;
+        }
         
         try {
+            console.log('🔍 Refreshing artifacts for chat:', window.chat.currentChatId);
             await this.updateArtifactStats();
             await this.displayArtifacts();
         } catch (error) {
-            console.error('Error refreshing artifact panel:', error);
+            console.error('🔍 Error refreshing artifact panel:', error);
         }
     }
     
-    // FIXED: Update artifact statistics from Redis
+    // FIXED: Update artifact statistics with direct API call
     async updateArtifactStats() {
-        if (!window.chat || !window.chat.artifacts) return;
+        if (!window.chat?.currentChatId) {
+            console.warn('🔍 No current chat ID for stats');
+            return;
+        }
         
         try {
-            const allArtifacts = await window.chat.artifacts.getAllArtifacts();
+            console.log('🔍 Fetching artifacts via API for chat:', window.chat.currentChatId);
             
-            console.log('Raw artifacts from server:', allArtifacts); // Debug log
+            // FIXED: Direct API call instead of going through chat.artifacts
+            const response = await fetch(`/api/chat/artifacts?chat_id=${encodeURIComponent(window.chat.currentChatId)}`);
+            if (!response.ok) {
+                throw new Error(`API error: ${response.status} ${response.statusText}`);
+            }
             
-            // Count artifacts by ID pattern since server might not set type correctly
-            const messageArtifacts = allArtifacts.filter(a => {
+            const data = await response.json();
+            const allArtifacts = data.artifacts || [];
+            
+            console.log('🔍 Raw artifacts from API:', allArtifacts);
+            console.log('🔍 Artifacts count:', allArtifacts.length);
+            
+            // FIXED: Better artifact classification
+            const messageArtifacts = [];
+            const codeBlockArtifacts = [];
+            const adminMessages = [];
+            const jaiMessages = [];
+            
+            allArtifacts.forEach(artifact => {
+                console.log(`🔍 Processing artifact: ${artifact.id}, type: ${artifact.type}`);
+                
                 // Check if it's a code block by ID pattern
-                const isCodeBlock = a.id && a.id.includes('_code(');
-                return !isCodeBlock;
-            });
-            
-            const codeBlockArtifacts = allArtifacts.filter(a => {
-                // Check if it's a code block by ID pattern
-                return a.id && a.id.includes('_code(');
-            });
-            
-            const adminMessages = allArtifacts.filter(a => {
-                const isCodeBlock = a.id && a.id.includes('_code(');
-                return !isCodeBlock && (a.type === 'admin' || (a.id && a.id.startsWith('admin(')));
-            });
-            
-            const jaiMessages = allArtifacts.filter(a => {
-                const isCodeBlock = a.id && a.id.includes('_code(');
-                return !isCodeBlock && (a.type === 'jai' || (a.id && a.id.startsWith('jai(')));
+                if (artifact.id && artifact.id.includes('_code(')) {
+                    codeBlockArtifacts.push(artifact);
+                    console.log(`🔍 Code block: ${artifact.id}`);
+                } else {
+                    // It's a message artifact
+                    messageArtifacts.push(artifact);
+                    
+                    if (artifact.type === 'admin' || (artifact.id && artifact.id.startsWith('admin('))) {
+                        adminMessages.push(artifact);
+                        console.log(`🔍 Admin message: ${artifact.id}`);
+                    } else if (artifact.type === 'jai' || (artifact.id && artifact.id.startsWith('jai('))) {
+                        jaiMessages.push(artifact);
+                        console.log(`🔍 JAI message: ${artifact.id}`);
+                    }
+                }
             });
             
             const stats = {
+                total: allArtifacts.length,
                 messages: messageArtifacts.length,
                 adminMessages: adminMessages.length,
                 jaiMessages: jaiMessages.length,
                 codeBlocks: codeBlockArtifacts.length
             };
             
-            console.log('Calculated stats:', stats); // Debug log
-            console.log('Code blocks found:', codeBlockArtifacts.map(a => a.id)); // Debug log
+            console.log('🔍 Final calculated stats:', stats);
             
             // Update stats display
-            const totalElement = document.getElementById('total-messages');
-            const userElement = document.getElementById('user-messages');
-            const aiElement = document.getElementById('ai-messages');
-            const codeElement = document.getElementById('code-blocks');
-            
-            if (totalElement) totalElement.textContent = stats.messages || 0;
-            if (userElement) userElement.textContent = stats.adminMessages || 0;
-            if (aiElement) aiElement.textContent = stats.jaiMessages || 0;
-            if (codeElement) codeElement.textContent = stats.codeBlocks || 0;
+            this.updateStatsDisplay(stats);
             
         } catch (error) {
-            console.error('Error updating artifact stats:', error);
-            
-            // Reset to 0 on error
-            const elements = ['total-messages', 'user-messages', 'ai-messages', 'code-blocks'];
-            elements.forEach(id => {
-                const element = document.getElementById(id);
-                if (element) element.textContent = '0';
-            });
+            console.error('🔍 Error updating artifact stats:', error);
+            this.resetStatsDisplay();
         }
     }
     
-    // FIXED: Display artifacts in the panel from Redis with enhanced debugging
+    // Update stats display elements
+    updateStatsDisplay(stats) {
+        const elements = {
+            'total-messages': stats.total,
+            'user-messages': stats.adminMessages,
+            'ai-messages': stats.jaiMessages,
+            'code-blocks': stats.codeBlocks
+        };
+        
+        Object.entries(elements).forEach(([id, value]) => {
+            const element = document.getElementById(id);
+            if (element) {
+                element.textContent = value || 0;
+                console.log(`🔍 Updated ${id}: ${value}`);
+            }
+        });
+    }
+    
+    // Reset stats display to 0
+    resetStatsDisplay() {
+        const elements = ['total-messages', 'user-messages', 'ai-messages', 'code-blocks'];
+        elements.forEach(id => {
+            const element = document.getElementById(id);
+            if (element) element.textContent = '0';
+        });
+    }
+    
+    // FIXED: Display artifacts with direct API call
     async displayArtifacts() {
         const artifactList = document.getElementById('artifact-list');
-        if (!artifactList || !window.chat || !window.chat.artifacts) return;
+        if (!artifactList) {
+            console.error('🔍 Artifact list element not found');
+            return;
+        }
+        
+        if (!window.chat?.currentChatId) {
+            artifactList.innerHTML = `
+                <div class="text-center text-muted p-3">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    <p class="mb-0 mt-2">No chat selected</p>
+                </div>
+            `;
+            return;
+        }
         
         try {
-            const allArtifacts = await window.chat.artifacts.getAllArtifacts();
+            console.log('🔍 Displaying artifacts for chat:', window.chat.currentChatId);
             
-            // Enhanced debug logging
-            console.log('=== ARTIFACTS DEBUG ===');
-            console.log('Total artifacts received:', allArtifacts.length);
-            console.log('All artifacts:', allArtifacts);
+            // FIXED: Direct API call
+            const response = await fetch(`/api/chat/artifacts?chat_id=${encodeURIComponent(window.chat.currentChatId)}`);
+            if (!response.ok) {
+                throw new Error(`API error: ${response.status} ${response.statusText}`);
+            }
             
-            // Analyze artifacts
-            const codeBlocks = allArtifacts.filter(a => a.id && a.id.includes('_code('));
-            const messages = allArtifacts.filter(a => !a.id || !a.id.includes('_code('));
+            const data = await response.json();
+            const allArtifacts = data.artifacts || [];
             
-            console.log('Code blocks found:', codeBlocks.length);
-            console.log('Code block IDs:', codeBlocks.map(a => a.id));
-            console.log('Code block details:', codeBlocks);
-            
-            console.log('Message artifacts found:', messages.length);
-            console.log('Message IDs:', messages.map(a => a.id));
-            console.log('=== END DEBUG ===');
+            console.log('🔍 Artifacts to display:', allArtifacts.length);
             
             if (allArtifacts.length === 0) {
                 artifactList.innerHTML = `
                     <div class="text-center text-muted p-3">
                         <i class="bi bi-inbox"></i>
                         <p class="mb-0 mt-2">No artifacts found</p>
+                        <small>Chat: ${window.chat.currentChatId}</small>
                     </div>
                 `;
                 return;
             }
             
-            // Sort by creation time
-            allArtifacts.sort((a, b) => a.timestamp - b.timestamp);
+            // Sort by timestamp
+            allArtifacts.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
             
             artifactList.innerHTML = '';
             
             allArtifacts.forEach((artifact, index) => {
-                console.log(`Creating item ${index + 1}:`, artifact.id, artifact.type);
-                const artifactElement = this.createArtifactListItem(artifact);
-                artifactList.appendChild(artifactElement);
+                console.log(`🔍 Creating display for artifact ${index + 1}:`, artifact.id);
+                try {
+                    const artifactElement = this.createArtifactListItem(artifact);
+                    if (artifactElement) {
+                        artifactList.appendChild(artifactElement);
+                    }
+                } catch (itemError) {
+                    console.error(`🔍 Error creating artifact item:`, itemError);
+                }
             });
             
-            // Show summary
-            console.log(`Rendered ${allArtifacts.length} artifacts in panel`);
+            console.log(`🔍 Successfully displayed ${allArtifacts.length} artifacts`);
             
         } catch (error) {
-            console.error('Error displaying artifacts:', error);
+            console.error('🔍 Error displaying artifacts:', error);
             artifactList.innerHTML = `
                 <div class="text-center text-danger p-3">
                     <i class="bi bi-exclamation-triangle"></i>
@@ -173,18 +223,14 @@ class ChatArtifactsPanel {
         }
     }
     
-    // FIXED: Create artifact list item element with robust detection and debug logging
+    // FIXED: Create artifact list item with better detection
     createArtifactListItem(artifact) {
         const item = document.createElement('div');
         item.className = 'artifact-item border rounded p-3 mb-2';
         item.dataset.artifactId = artifact.id;
         
-        // ROBUST: Determine if this is a code block by multiple methods
-        const isCodeBlockById = artifact.id && artifact.id.includes('_code(');
-        const isCodeBlockByType = artifact.type === 'code_block';
-        const hasCode = artifact.code && artifact.code.trim() !== '';
-        
-        const isCodeBlock = isCodeBlockById || isCodeBlockByType || hasCode;
+        // ROBUST: Determine if this is a code block
+        const isCodeBlock = artifact.id && artifact.id.includes('_code(');
         
         // Determine display type
         let displayType;
@@ -198,31 +244,19 @@ class ChatArtifactsPanel {
             displayType = artifact.type || 'unknown';
         }
         
-        // Debug logging
-        console.log('Artifact item creation:', {
-            id: artifact.id,
-            originalType: artifact.type,
-            displayType: displayType,
-            isCodeBlock: isCodeBlock,
-            hasCode: hasCode,
-            codeLength: artifact.code ? artifact.code.length : 0
-        });
-        
         item.dataset.artifactType = displayType;
         
         const typeIcon = this.getArtifactTypeIcon(displayType);
         const typeLabel = this.getArtifactTypeLabel(displayType);
-        const timestamp = new Date(artifact.timestamp * 1000).toLocaleString();
+        const timestamp = new Date((artifact.timestamp || 0) * 1000).toLocaleString();
         
         let content = '';
         let preview = '';
         
         if (isCodeBlock) {
-            // For code blocks, prefer 'code' field, fallback to 'content'
             content = artifact.code || artifact.content || '';
             preview = content.length > 100 ? content.substring(0, 100) + '...' : content;
         } else {
-            // For messages, use 'content' field
             content = artifact.content || '';
             preview = content.length > 150 ? content.substring(0, 150) + '...' : content;
         }
@@ -242,9 +276,11 @@ class ChatArtifactsPanel {
                     <button class="btn btn-sm btn-outline-primary" onclick="window.artifactsPanel.copyArtifactId('${artifact.id}')" title="Copy ID">
                         <i class="bi bi-clipboard"></i>
                     </button>
-                    <button class="btn btn-sm btn-outline-info" onclick="window.artifactsPanel.copyArtifactContent('${artifact.id}')" title="Copy Content">
-                        <i class="bi bi-files"></i>
-                    </button>
+                    ${isCodeBlock ? `
+                        <button class="btn btn-sm btn-outline-info" onclick="window.artifactsPanel.showCodePanel('${artifact.id}')" title="View Code">
+                            <i class="bi bi-code-square"></i>
+                        </button>
+                    ` : ''}
                     <button class="btn btn-sm btn-outline-success" onclick="window.artifactsPanel.jumpToArtifact('${artifact.id}')" title="Jump to Message">
                         <i class="bi bi-arrow-right"></i>
                     </button>
@@ -262,7 +298,7 @@ class ChatArtifactsPanel {
         return item;
     }
     
-    // Get icon for artifact type (updated for admin/jai)
+    // Get icon for artifact type
     getArtifactTypeIcon(type) {
         switch (type) {
             case 'admin': return 'bi-person-circle-fill text-primary';
@@ -272,13 +308,221 @@ class ChatArtifactsPanel {
         }
     }
     
-    // Get label for artifact type (updated for admin/jai)
+    // Get label for artifact type
     getArtifactTypeLabel(type) {
         switch (type) {
             case 'admin': return 'Admin';
             case 'jai': return 'JAI';
             case 'code_block': return 'Code';
             default: return 'Unknown';
+        }
+    }
+    
+    // NEW: Show code panel for code blocks
+    async showCodePanel(artifactId) {
+        try {
+            console.log('🔍 Showing code panel for:', artifactId);
+            
+            // Fetch the specific artifact
+            const response = await fetch(`/api/chat/artifacts?chat_id=${encodeURIComponent(window.chat.currentChatId)}`);
+            if (!response.ok) {
+                throw new Error(`Failed to fetch artifact: ${response.status}`);
+            }
+            
+            const data = await response.json();
+            const artifact = data.artifacts.find(a => a.id === artifactId);
+            
+            if (!artifact) {
+                throw new Error('Artifact not found');
+            }
+            
+            // Create and show code panel
+            this.createCodePanel(artifact);
+            
+        } catch (error) {
+            console.error('🔍 Error showing code panel:', error);
+            if (window.chat && window.chat.ui) {
+                window.chat.ui.showToast('Failed to load code block', 'error');
+            }
+        }
+    }
+    
+    // ENHANCED: Create code panel with full features
+    createCodePanel(artifact) {
+        // Remove existing code panel
+        this.closeCodePanel();
+        
+        const code = artifact.code || artifact.content || '';
+        const language = artifact.language || '';
+        
+        // Create backdrop for mobile
+        const backdrop = document.createElement('div');
+        backdrop.id = 'code-panel-backdrop';
+        backdrop.className = 'code-panel-backdrop';
+        backdrop.onclick = () => this.closeCodePanel();
+        
+        // Create code panel HTML
+        const panel = document.createElement('div');
+        panel.id = 'code-panel';
+        panel.className = 'code-panel';
+        panel.innerHTML = `
+            <div class="code-panel-header">
+                <div class="code-panel-title">
+                    <i class="bi bi-code-square"></i>
+                    <strong>${artifact.id}</strong>
+                    ${language ? `<span class="badge bg-info ms-2">${language}</span>` : ''}
+                    <small class="text-muted ms-2">(${code.split('\n').length} lines)</small>
+                </div>
+                <div class="code-panel-actions">
+                    <button class="btn btn-sm btn-outline-secondary" onclick="window.artifactsPanel.copyCodeContent('${artifact.id}')" title="Copy Code">
+                        <i class="bi bi-clipboard"></i> Copy
+                    </button>
+                    <button class="btn btn-sm btn-outline-info" onclick="window.artifactsPanel.downloadCode('${artifact.id}')" title="Download">
+                        <i class="bi bi-download"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-danger" onclick="window.artifactsPanel.closeCodePanel()" title="Close">
+                        <i class="bi bi-x"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="code-panel-content">
+                <pre><code class="language-${language}">${this.escapeHtml(code)}</code></pre>
+            </div>
+        `;
+        
+        // Add backdrop and panel to page
+        document.body.appendChild(backdrop);
+        document.body.appendChild(panel);
+        
+        // Animate in
+        setTimeout(() => {
+            backdrop.classList.add('show');
+            panel.classList.add('show');
+            panel.classList.add('opening');
+        }, 10);
+        
+        // Apply syntax highlighting if Prism is available
+        if (window.Prism) {
+            setTimeout(() => {
+                const codeElement = panel.querySelector('code');
+                if (codeElement) {
+                    Prism.highlightElement(codeElement);
+                }
+            }, 100);
+        }
+        
+        // Store current artifact for copy function
+        this.currentCodeArtifact = artifact;
+        
+        // Add keyboard support
+        this.addCodePanelKeyboardSupport();
+        
+        console.log('🔍 Code panel created and animated for:', artifact.id);
+    }
+    
+    // Enhanced close with animation
+    closeCodePanel() {
+        const panel = document.getElementById('code-panel');
+        const backdrop = document.getElementById('code-panel-backdrop');
+        
+        if (panel) {
+            panel.classList.remove('show');
+            setTimeout(() => panel.remove(), 300);
+        }
+        
+        if (backdrop) {
+            backdrop.classList.remove('show');
+            setTimeout(() => backdrop.remove(), 300);
+        }
+        
+        this.currentCodeArtifact = null;
+        this.removeCodePanelKeyboardSupport();
+    }
+    
+    // NEW: Download code functionality
+    downloadCode(artifactId) {
+        try {
+            if (this.currentCodeArtifact && this.currentCodeArtifact.id === artifactId) {
+                const code = this.currentCodeArtifact.code || this.currentCodeArtifact.content || '';
+                const language = this.currentCodeArtifact.language || 'txt';
+                const filename = `${artifactId.replace(/[^a-zA-Z0-9]/g, '_')}.${language}`;
+                
+                const blob = new Blob([code], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                
+                if (window.chat && window.chat.ui) {
+                    window.chat.ui.showToast(`Downloaded ${filename}`, 'success');
+                }
+            }
+        } catch (error) {
+            console.error('🔍 Error downloading code:', error);
+            if (window.chat && window.chat.ui) {
+                window.chat.ui.showToast('Failed to download code', 'error');
+            }
+        }
+    }
+    
+    // NEW: Keyboard support for code panel
+    addCodePanelKeyboardSupport() {
+        this.keyboardHandler = (e) => {
+            switch(e.key) {
+                case 'Escape':
+                    this.closeCodePanel();
+                    break;
+                case 'c':
+                    if (e.ctrlKey || e.metaKey) {
+                        e.preventDefault();
+                        if (this.currentCodeArtifact) {
+                            this.copyCodeContent(this.currentCodeArtifact.id);
+                        }
+                    }
+                    break;
+                case 'd':
+                    if (e.ctrlKey || e.metaKey) {
+                        e.preventDefault();
+                        if (this.currentCodeArtifact) {
+                            this.downloadCode(this.currentCodeArtifact.id);
+                        }
+                    }
+                    break;
+            }
+        };
+        
+        document.addEventListener('keydown', this.keyboardHandler);
+    }
+    
+    // Remove keyboard support
+    removeCodePanelKeyboardSupport() {
+        if (this.keyboardHandler) {
+            document.removeEventListener('keydown', this.keyboardHandler);
+            this.keyboardHandler = null;
+        }
+    }
+    
+    // NEW: Copy code content
+    async copyCodeContent(artifactId) {
+        try {
+            if (this.currentCodeArtifact && this.currentCodeArtifact.id === artifactId) {
+                const code = this.currentCodeArtifact.code || this.currentCodeArtifact.content || '';
+                await navigator.clipboard.writeText(code);
+                
+                if (window.chat && window.chat.ui) {
+                    window.chat.ui.showToast('Code copied to clipboard!', 'success');
+                }
+            }
+        } catch (error) {
+            console.error('🔍 Error copying code:', error);
+            if (window.chat && window.chat.ui) {
+                window.chat.ui.showToast('Failed to copy code', 'error');
+            }
         }
     }
     
@@ -320,30 +564,6 @@ class ChatArtifactsPanel {
                 window.chat.ui.showToast('Failed to copy ID', 'error');
             }
         });
-    }
-    
-    // Copy artifact content to clipboard
-    async copyArtifactContent(artifactId) {
-        try {
-            const artifact = await window.chat?.getArtifactReference(artifactId);
-            if (artifact) {
-                const content = artifact.code || artifact.content || '';
-                await navigator.clipboard.writeText(content);
-                
-                if (window.chat && window.chat.ui) {
-                    window.chat.ui.showToast('Artifact content copied!', 'success');
-                }
-            } else {
-                if (window.chat && window.chat.ui) {
-                    window.chat.ui.showToast('Artifact not found', 'warning');
-                }
-            }
-        } catch (error) {
-            console.error('Failed to copy artifact content:', error);
-            if (window.chat && window.chat.ui) {
-                window.chat.ui.showToast('Failed to copy content', 'error');
-            }
-        }
     }
     
     // Jump to artifact in chat
@@ -406,3 +626,20 @@ class ChatArtifactsPanel {
 
 // Initialize artifacts panel
 window.artifactsPanel = new ChatArtifactsPanel();
+
+// Initialize auto-close on outside click for desktop
+document.addEventListener('DOMContentLoaded', () => {
+    document.addEventListener('click', (e) => {
+        const panel = document.getElementById('code-panel');
+        const clickedButton = e.target.closest('.code-block-btn, .code-block-overlay');
+        
+        if (panel && !panel.contains(e.target) && !clickedButton) {
+            // Only auto-close on desktop
+            if (window.innerWidth > 768) {
+                window.artifactsPanel?.closeCodePanel();
+            }
+        }
+    });
+    
+    console.log('🔍 Code panel auto-close initialized');
+});

@@ -4,7 +4,7 @@ local utils = require "chat_utils"
 local _M = {}
 
 -- Extract and save code blocks from content and create artifacts with proper IDs
-function _M.extract_and_save_code_blocks(redis, chat_id, message_id, content)
+function _M.extract_and_save_code_blocks(redis_connection, chat_id, message_id, content)
     local artifacts = {}
     local code_block_index = 0
     
@@ -13,26 +13,40 @@ function _M.extract_and_save_code_blocks(redis, chat_id, message_id, content)
         code_block_index = code_block_index + 1
         local artifact_id = utils.generate_artifact_id(message_id, code_block_index)
         
-        local artifact, err = redis.save_artifact(chat_id, artifact_id, message_id, code, lang, {
-            extracted_from_response = true,
-            block_index = code_block_index,
-            extraction_timestamp = ngx.time()
-        })
+        -- Save artifact directly using Redis connection
+        local artifact_data = {
+            id = artifact_id,
+            parent_id = message_id,
+            type = "code_block",
+            code = code,
+            language = lang or "",
+            metadata = {
+                extracted_from_response = true,
+                block_index = code_block_index,
+                extraction_timestamp = ngx.time()
+            },
+            timestamp = ngx.time(),
+            chat_id = chat_id
+        }
         
-        if artifact then
-            table.insert(artifacts, artifact_id)
-            utils.log_info("chat_artifacts", "extract_code_block", {
-                chat_id = chat_id,
-                artifact_id = artifact_id,
-                language = lang,
-                code_length = #code
-            })
-        else
-            utils.log_error("chat_artifacts", "extract_code_block", "Failed to save artifact", {
-                error = err,
-                artifact_id = artifact_id
-            })
-        end
+        -- Save individual artifact
+        local artifact_key = "artifact:" .. utils.USER_ID .. ":" .. chat_id .. ":" .. artifact_id
+        redis_connection:set(artifact_key, require("cjson").encode(artifact_data))
+        redis_connection:expire(artifact_key, 86400 * 365)
+        
+        -- Add to chat artifacts list
+        local chat_artifacts_key = "chat:artifacts:" .. utils.USER_ID .. ":" .. chat_id
+        redis_connection:lpush(chat_artifacts_key, artifact_id)
+        redis_connection:expire(chat_artifacts_key, 86400 * 365)
+        
+        table.insert(artifacts, artifact_id)
+        
+        utils.log_info("chat_artifacts", "extract_code_block", {
+            chat_id = chat_id,
+            artifact_id = artifact_id,
+            language = lang,
+            code_length = #code
+        })
     end
     
     utils.log_info("chat_artifacts", "extract_and_save_code_blocks", {
@@ -128,36 +142,59 @@ function _M.sort_artifacts(artifacts, sort_by, sort_order)
         comparison_func = function(a, b)
             local a_time = a.timestamp or 0
             local b_time = b.timestamp or 0
-            return sort_order == "desc" and a_time > b_time or a_time < b_time
+            if sort_order == "desc" then
+                return a_time > b_time
+            else
+                return a_time < b_time
+            end
         end
     elseif sort_by == "id" then
         comparison_func = function(a, b)
             local a_id = a.id or ""
             local b_id = b.id or ""
-            return sort_order == "desc" and a_id > b_id or a_id < b_id
+            if sort_order == "desc" then
+                return a_id > b_id
+            else
+                return a_id < b_id
+            end
         end
     elseif sort_by == "type" then
         comparison_func = function(a, b)
             local a_type = a.type or ""
             local b_type = b.type or ""
-            return sort_order == "desc" and a_type > b_type or a_type < b_type
+            if sort_order == "desc" then
+                return a_type > b_type
+            else
+                return a_type < b_type
+            end
         end
     elseif sort_by == "size" then
         comparison_func = function(a, b)
             local a_size = #(a.content or a.code or "")
             local b_size = #(b.content or b.code or "")
-            return sort_order == "desc" and a_size > b_size or a_size < b_size
+            if sort_order == "desc" then
+                return a_size > b_size
+            else
+                return a_size < b_size
+            end
         end
     else
         -- Default to timestamp
         comparison_func = function(a, b)
             local a_time = a.timestamp or 0
             local b_time = b.timestamp or 0
-            return sort_order == "desc" and a_time > b_time or a_time < b_time
+            if sort_order == "desc" then
+                return a_time > b_time
+            else
+                return a_time < b_time
+            end
         end
     end
     
-    table.sort(artifacts, comparison_func)
+    -- Add safety check to ensure we have artifacts to sort
+    if artifacts and #artifacts > 1 then
+        table.sort(artifacts, comparison_func)
+    end
 end
 
 -- Get artifact statistics

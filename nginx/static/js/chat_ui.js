@@ -1,4 +1,4 @@
-// UI functionality and visual elements - Updated for chat(n) format with placeholders
+// UI functionality and visual elements - Updated for chat(n) format with placeholders and enhanced code blocks
 class ChatUI {
     constructor(chatInstance) {
         this.chatInstance = chatInstance;
@@ -192,6 +192,7 @@ class ChatUI {
         return div.innerHTML;
     }
     
+    // ENHANCED: Code blocks with panel support
     enhanceCodeBlocks(contentDiv, originalContent) {
         if (window.Prism) {
             contentDiv.querySelectorAll('pre code').forEach((block) => {
@@ -200,53 +201,103 @@ class ChatUI {
         }
         
         contentDiv.querySelectorAll('pre').forEach((preElement, index) => {
-            this.addCopyButtonToCodeBlock(preElement, originalContent);
+            this.enhanceCodeBlockWithPanel(preElement, originalContent, index);
         });
         
         this.addMessageCopyButton(contentDiv, originalContent);
     }
     
-    addCopyButtonToCodeBlock(preElement, originalContent) {
+    // NEW: Enhanced code block with panel support
+    enhanceCodeBlockWithPanel(preElement, originalContent, blockIndex) {
         const codeElement = preElement.querySelector('code');
         if (!codeElement) return;
         
         const codeText = codeElement.textContent || codeElement.innerText;
+        const codeLines = codeText.split('\n').length;
         
-        const wrapper = document.createElement('div');
-        wrapper.style.position = 'relative';
-        wrapper.style.marginBottom = '1rem';
+        // Determine if this is a large code block (>12 lines)
+        const isLargeCodeBlock = codeLines > 12;
         
+        // Add large-code class and overlay for large blocks
+        if (isLargeCodeBlock) {
+            preElement.classList.add('large-code');
+            
+            // Create overlay with line count
+            const overlay = document.createElement('div');
+            overlay.className = 'code-block-overlay';
+            overlay.innerHTML = `<i class="bi bi-arrows-fullscreen"></i> View Full Code (${codeLines} lines)`;
+            
+            // Get artifact ID from message element
+            const messageElement = preElement.closest('.message');
+            const messageId = messageElement?.dataset.messageId;
+            const artifactId = messageId ? `${messageId}_code(${blockIndex + 1})` : null;
+            
+            console.log(`🔍 Code block overlay: messageId=${messageId}, artifactId=${artifactId}, lines=${codeLines}`);
+            
+            if (artifactId) {
+                overlay.onclick = () => {
+                    console.log(`🔍 Opening code panel for: ${artifactId}`);
+                    if (window.artifactsPanel && window.artifactsPanel.showCodePanel) {
+                        window.artifactsPanel.showCodePanel(artifactId);
+                    } else {
+                        console.warn('Artifacts panel not available');
+                        this.showToast('Code panel not available', 'warning');
+                    }
+                };
+            }
+            
+            preElement.appendChild(overlay);
+        }
+        
+        // Create action buttons container
+        const actionsContainer = document.createElement('div');
+        actionsContainer.className = 'code-block-actions';
+        
+        // Copy button
         const copyButton = document.createElement('button');
-        copyButton.className = 'btn btn-outline-secondary btn-sm code-copy-btn';
+        copyButton.className = 'code-block-btn btn-copy';
         copyButton.innerHTML = '<i class="bi bi-clipboard"></i>';
         copyButton.title = 'Copy code';
-        copyButton.style.cssText = `
-            position: absolute;
-            top: 8px;
-            right: 8px;
-            z-index: 10;
-            padding: 4px 8px;
-            font-size: 12px;
-            opacity: 0.7;
-            transition: opacity 0.2s ease;
-        `;
-        
-        copyButton.addEventListener('mouseenter', () => {
-            copyButton.style.opacity = '1';
-        });
-        
-        copyButton.addEventListener('mouseleave', () => {
-            copyButton.style.opacity = '0.7';
-        });
-        
         copyButton.onclick = (e) => {
             e.stopPropagation();
             this.copyToClipboard(codeText, copyButton);
         };
         
-        preElement.parentNode.insertBefore(wrapper, preElement);
-        wrapper.appendChild(preElement);
-        wrapper.appendChild(copyButton);
+        actionsContainer.appendChild(copyButton);
+        
+        // View panel button for large code blocks
+        if (isLargeCodeBlock) {
+            const viewButton = document.createElement('button');
+            viewButton.className = 'code-block-btn btn-view';
+            viewButton.innerHTML = '<i class="bi bi-arrows-fullscreen"></i>';
+            viewButton.title = 'View in panel';
+            
+            // Get artifact ID from message element
+            const messageElement = preElement.closest('.message');
+            const messageId = messageElement?.dataset.messageId;
+            const artifactId = messageId ? `${messageId}_code(${blockIndex + 1})` : null;
+            
+            if (artifactId) {
+                viewButton.onclick = (e) => {
+                    e.stopPropagation();
+                    console.log(`🔍 View button clicked for: ${artifactId}`);
+                    if (window.artifactsPanel && window.artifactsPanel.showCodePanel) {
+                        window.artifactsPanel.showCodePanel(artifactId);
+                    } else {
+                        console.warn('Artifacts panel not available');
+                        this.showToast('Code panel not available', 'warning');
+                    }
+                };
+            }
+            
+            actionsContainer.appendChild(viewButton);
+        }
+        
+        // Add actions to the pre element
+        preElement.appendChild(actionsContainer);
+        
+        // Ensure the pre element has relative positioning
+        preElement.style.position = 'relative';
     }
     
     addMessageCopyButton(contentDiv, content) {
@@ -263,6 +314,7 @@ class ChatUI {
         contentDiv.appendChild(buttonWrapper);
     }
     
+    // ENHANCED: Better copy functionality
     async copyToClipboard(text, button) {
         try {
             await navigator.clipboard.writeText(text);
@@ -276,9 +328,12 @@ class ChatUI {
                 button.classList.remove('text-success');
             }, 2000);
             
+            this.showToast('Copied to clipboard!', 'success');
+            
         } catch (err) {
             console.error('Failed to copy text: ', err);
             
+            // Fallback for older browsers
             const textArea = document.createElement('textarea');
             textArea.value = text;
             document.body.appendChild(textArea);
@@ -296,8 +351,11 @@ class ChatUI {
                     button.classList.remove('text-success');
                 }, 2000);
                 
+                this.showToast('Copied to clipboard!', 'success');
+                
             } catch (fallbackErr) {
                 console.error('Fallback copy failed: ', fallbackErr);
+                this.showToast('Failed to copy to clipboard', 'error');
             }
             
             document.body.removeChild(textArea);
@@ -494,7 +552,7 @@ class ChatUI {
         }
     }
 
-    // FIXED renderChatMessages - Remove placeholders first and fix ID handling
+    // UPDATED: renderChatMessages to set message ID for artifacts
     renderChatMessages(result, artifacts) {
         const messagesContainer = document.getElementById('messages-content');
         const welcomePrompt = document.getElementById('welcome-prompt');
@@ -524,13 +582,15 @@ class ChatUI {
         
         // Load messages and process with artifacts
         for (const msg of messages) {
-            // FIXED: Use msg.role for sender, not msg.id
+            // Use msg.role for sender, not msg.id
             const sender = msg.role === 'user' ? 'user' : 'assistant';
             const messageElement = this.addMessage(sender, msg.content, false, msg.files || []);
             
             if (messageElement && msg.id) {
-                // Set the message ID as data attribute for artifacts
+                // CRITICAL: Set the message ID as data attribute for code block detection
                 messageElement.dataset.messageId = msg.id;
+                
+                console.log(`🔍 Set messageId=${msg.id} on message element`);
                 
                 // Determine artifact type from message ID format or role
                 let messageType;

@@ -24,11 +24,12 @@ function _M.generate_chat_id()
 end
 
 -- Generate message ID using admin(n) and jai(n) format
-function _M.generate_message_id(redis, chat_id, message_type)
+-- Note: This function now takes a Redis connection, not the redis module
+function _M.generate_message_id(redis_connection, chat_id, message_type)
     local id_type = message_type == "user" and "admin" or "jai"
     local counter_key = "chat:counter:" .. _M.USER_ID .. ":" .. chat_id .. ":" .. id_type
-    local counter = redis:incr(counter_key)
-    redis:expire(counter_key, 86400 * 365) -- Expire after 1 year
+    local counter = redis_connection:incr(counter_key)
+    redis_connection:expire(counter_key, 86400 * 365) -- Expire after 1 year
     return id_type .. "(" .. counter .. ")"
 end
 
