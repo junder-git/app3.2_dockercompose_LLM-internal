@@ -7,8 +7,8 @@ local _M = {}
 -- Create HTTP client for Ollama requests with no timeout limits
 function _M.create_client()
     local httpc = http.new()
-    -- FIXED: Remove timeout limits to allow full AI responses
-    httpc:set_timeout(0) -- No timeout - let AI complete fully
+    -- CRITICAL: Do NOT set any timeouts here - use per-request timeouts
+    -- httpc:set_timeout() -- Let each request set its own timeout
     return httpc
 end
 
@@ -40,6 +40,38 @@ function _M.prepare_request(context_messages, options)
     return request_data
 end
 
+-- FIXED: Added missing prepare_context_with_files function
+function _M.prepare_context_with_files(context_messages, files)
+    local enhanced_context = {}
+    
+    -- Copy existing messages
+    for _, msg in ipairs(context_messages) do
+        table.insert(enhanced_context, {
+            role = msg.role,
+            content = msg.content
+        })
+    end
+    
+    -- Add file context to the last user message if files are provided
+    if files and #files > 0 then
+        local file_context = utils.format_files_for_context(files)
+        if file_context ~= "" and #enhanced_context > 0 then
+            local last_message = enhanced_context[#enhanced_context]
+            if last_message.role == "user" then
+                last_message.content = last_message.content .. file_context
+            end
+        end
+    end
+    
+    utils.log_info("chat_ollama", "prepare_context_with_files", {
+        original_message_count = #context_messages,
+        enhanced_message_count = #enhanced_context,
+        files_count = files and #files or 0
+    })
+    
+    return enhanced_context
+end
+
 -- Send request to Ollama API with enhanced error handling
 function _M.send_request(httpc, request_data)
     local url = utils.MODEL_URL .. "/api/chat"
@@ -56,11 +88,9 @@ function _M.send_request(httpc, request_data)
         body = cjson.encode(request_data),
         headers = {
             ["Content-Type"] = "application/json"
-        },
-        -- ENHANCED: No timeouts for complete responses
-        read_timeout = 0,
-        send_timeout = 0,
-        connect_timeout = 30000 -- Only connection timeout
+        }
+        -- CRITICAL: Remove all timeout settings - let nginx handle it
+        -- read_timeout, send_timeout, connect_timeout removed
     })
     
     if not res then
@@ -269,14 +299,13 @@ end
 function _M.health_check()
     local httpc = _M.create_client()
     
-    -- Check if Ollama is responding
+    -- Check if Ollama is responding - with reasonable timeout for health check
     local res, err = httpc:request_uri(utils.MODEL_URL .. "/api/tags", {
         method = "GET",
         headers = {
             ["Content-Type"] = "application/json"
-        },
-        connect_timeout = 30000,
-        read_timeout = 10000
+        }
+        -- Use default OpenResty timeout for health checks only
     })
     
     httpc:close()
