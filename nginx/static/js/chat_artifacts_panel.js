@@ -323,6 +323,25 @@ class ChatArtifactsPanel {
         try {
             console.log('🔍 Showing code panel for:', artifactId);
             
+            // FIXED: Close the artifacts modal first if it's open
+            if (this.modal && this.modal._element && this.modal._element.classList.contains('show')) {
+                console.log('🔍 Closing artifacts modal to show code panel');
+                this.modal.hide();
+                
+                // Wait for modal to close before showing code panel
+                await new Promise(resolve => {
+                    const modalElement = this.modal._element;
+                    const onHidden = () => {
+                        modalElement.removeEventListener('hidden.bs.modal', onHidden);
+                        resolve();
+                    };
+                    modalElement.addEventListener('hidden.bs.modal', onHidden);
+                });
+                
+                // Small additional delay to ensure clean transition
+                await new Promise(resolve => setTimeout(resolve, 150));
+            }
+            
             // Fetch the specific artifact
             const response = await fetch(`/api/chat/artifacts?chat_id=${encodeURIComponent(window.chat.currentChatId)}`);
             if (!response.ok) {

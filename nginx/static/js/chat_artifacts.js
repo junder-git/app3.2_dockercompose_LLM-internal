@@ -103,13 +103,38 @@ class ChatArtifacts {
         const idBadge = document.createElement('span');
         idBadge.className = 'artifact-id-badge artifact-id-code';
         idBadge.textContent = codeBlockId;
-        idBadge.title = `Code Block ID: ${codeBlockId} (Click to copy)`;
+        idBadge.title = `Code Block ID: ${codeBlockId} (Click to view in panel)`;
         
-        // Add click to copy functionality
+        // FIXED: Add click to open code panel instead of just copying
         idBadge.addEventListener('click', (e) => {
             e.stopPropagation();
+            
+            // Check if artifacts panel is available and has showCodePanel method
+            if (window.artifactsPanel && typeof window.artifactsPanel.showCodePanel === 'function') {
+                console.log(`🔍 Opening code panel for: ${codeBlockId}`);
+                window.artifactsPanel.showCodePanel(codeBlockId);
+            } else {
+                console.warn('Artifacts panel not available, falling back to copy');
+                // Fallback to copy if panel not available
+                navigator.clipboard.writeText(codeBlockId).then(() => {
+                    this.showCopyFeedback(idBadge);
+                }).catch(err => {
+                    console.error('Failed to copy code block ID:', err);
+                    this.fallbackCopyToClipboard(codeBlockId, idBadge);
+                });
+            }
+        });
+        
+        // ADDED: Right-click to copy ID (for users who still want to copy)
+        idBadge.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            
             navigator.clipboard.writeText(codeBlockId).then(() => {
                 this.showCopyFeedback(idBadge);
+                if (window.chat && window.chat.ui) {
+                    window.chat.ui.showToast('Code block ID copied!', 'success');
+                }
             }).catch(err => {
                 console.error('Failed to copy code block ID:', err);
                 this.fallbackCopyToClipboard(codeBlockId, idBadge);
@@ -131,6 +156,17 @@ class ChatArtifacts {
             user-select: none;
             transition: all 0.2s ease;
         `;
+        
+        // Add hover effect
+        idBadge.addEventListener('mouseenter', () => {
+            idBadge.style.backgroundColor = 'rgba(13, 110, 253, 0.8)';
+            idBadge.style.transform = 'scale(1.05)';
+        });
+        
+        idBadge.addEventListener('mouseleave', () => {
+            idBadge.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+            idBadge.style.transform = 'scale(1)';
+        });
         
         // Ensure the pre element has relative positioning
         preElement.style.position = 'relative';

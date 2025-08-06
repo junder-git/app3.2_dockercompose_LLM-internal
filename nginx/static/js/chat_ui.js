@@ -265,33 +265,35 @@ class ChatUI {
         
         actionsContainer.appendChild(copyButton);
         
-        // View panel button for large code blocks
-        if (isLargeCodeBlock) {
-            const viewButton = document.createElement('button');
-            viewButton.className = 'code-block-btn btn-view';
-            viewButton.innerHTML = '<i class="bi bi-arrows-fullscreen"></i>';
-            viewButton.title = 'View in panel';
-            
-            // Get artifact ID from message element
-            const messageElement = preElement.closest('.message');
-            const messageId = messageElement?.dataset.messageId;
-            const artifactId = messageId ? `${messageId}_code(${blockIndex + 1})` : null;
-            
-            if (artifactId) {
-                viewButton.onclick = (e) => {
-                    e.stopPropagation();
-                    console.log(`🔍 View button clicked for: ${artifactId}`);
-                    if (window.artifactsPanel && window.artifactsPanel.showCodePanel) {
-                        window.artifactsPanel.showCodePanel(artifactId);
-                    } else {
-                        console.warn('Artifacts panel not available');
-                        this.showToast('Code panel not available', 'warning');
-                    }
-                };
-            }
-            
-            actionsContainer.appendChild(viewButton);
+        // ENHANCED: View panel button for ALL code blocks (not just large ones)
+        const viewButton = document.createElement('button');
+        viewButton.className = 'code-block-btn btn-view';
+        viewButton.innerHTML = '<i class="bi bi-arrows-fullscreen"></i>';
+        viewButton.title = 'View in panel';
+        
+        // Get artifact ID from message element
+        const messageElement = preElement.closest('.message');
+        const messageId = messageElement?.dataset.messageId;
+        const artifactId = messageId ? `${messageId}_code(${blockIndex + 1})` : null;
+        
+        if (artifactId) {
+            viewButton.onclick = (e) => {
+                e.stopPropagation();
+                console.log(`🔍 View button clicked for: ${artifactId}`);
+                if (window.artifactsPanel && window.artifactsPanel.showCodePanel) {
+                    window.artifactsPanel.showCodePanel(artifactId);
+                } else {
+                    console.warn('Artifacts panel not available');
+                    this.showToast('Code panel not available', 'warning');
+                }
+            };
+        } else {
+            // Disable button if no artifact ID
+            viewButton.disabled = true;
+            viewButton.title = 'Artifact ID not available';
         }
+        
+        actionsContainer.appendChild(viewButton);
         
         // Add actions to the pre element
         preElement.appendChild(actionsContainer);
