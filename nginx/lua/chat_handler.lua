@@ -62,7 +62,292 @@ end
 
 -- Save message with proper structure including artifact references
 local function save_message(redis, chat_id, message_id, role, content, files, artifacts)
-    local message_data = {
+    local message_ids = redis:lrange(chat_messages_key, 0, -1)
+    local artifact_ids = redis:lrange(chat_artifacts_key, 0, -1)
+    
+    local deleted_items = 0
+    
+    -- Delete individual messages
+    if message_ids and type(message_ids) == "table" then
+        for _, message_id in ipairs(message_ids) do
+            local message_key = "message:" .. USER_ID .. ":" .. chat_id .. ":" .. message_id
+            deleted_items = deleted_items + redis:del(message_key)
+        end
+    end
+    
+    -- Delete individual artifacts
+    if artifact_ids and type(artifact_ids) == "table" then
+        for _, artifact_id in ipairs(artifact_ids) do
+            local artifact_key = "artifact:" .. USER_ID .. ":" .. chat_id .. ":" .. artifact_id
+            deleted_items = deleted_items + redis:del(artifact_key)
+        end
+    end
+    
+    -- Delete all chat keys
+    deleted_items = deleted_items + redis:del(chat_messages_key)
+    deleted_items = deleted_items + redis:del(chat_artifacts_key)
+    deleted_items = deleted_items + redis:del(chat_meta_key)
+    deleted_items = deleted_items + redis:del(counter_admin_key)
+    deleted_items = deleted_items + redis:del(counter_jai_key)
+    
+    redis_client.close(redis)
+    
+    ngx.say(cjson.encode({
+        success = true,
+        deleted_count = deleted_items
+    }))
+end
+
+-- Delete all chats for a user
+function _M.handle_delete_all_chats()
+    if ngx.req.get_method() ~= "POST" then
+        ngx.status = 405
+        ngx.say(cjson.encode({error = "Method not allowed"}))
+        return
+    end
+    
+    ngx.header["Content-Type"] = "application/json"
+    
+    local redis = redis_client.connect()
+    if not redis then
+        ngx.status = 500
+        ngx.say(cjson.encode({error = "Redis connection failed"}))
+        return
+    end
+    
+    local deleted_count = 0
+    
+    -- Get all patterns for this user
+    local patterns = {
+        "message:" .. USER_ID .. ":*",
+        "artifact:" .. USER_ID .. ":*",
+        "chat:messages:" .. USER_ID .. ":*",
+        "chat:artifacts:" .. USER_ID .. ":*",
+        "chat:meta:" .. USER_ID .. ":*",
+        "chat:counter:" .. USER_ID .. ":*"
+    }
+    
+    for _, pattern in ipairs(patterns) do
+        local keys = redis:keys(pattern)
+        if keys and type(keys) == "table" then
+            for _, key in ipairs(keys) do
+                deleted_count = deleted_count + redis:del(key)
+            end
+        end
+    end
+    
+    redis_client.close(redis)
+    
+    ngx.say(cjson.encode({
+        success = true,
+        deleted_count = deleted_count
+    }))
+end
+
+-- ENHANCED: Handle streaming chat with proper Redis storage and artifact generation
+function _M.handle_chat_stream()
+    if ngx.req.get_method() ~= "POST" then
+        ngx.status = 405
+        ngx.say("Method not allowed")
+        return
+    end
+    
+    -- ENHANCED: Read request body with file upload support
+    local body, error_info = read_request_body()
+    if not body then
+        ngx.status = 400
+        ngx.say(cjson.encode(error_info))
+        return
+    end
+    
+    local ok, request_data = pcall(cjson.decode, body)
+    if not ok then
+        ngx.status = 400
+        ngx.log(ngx.ERR, "Invalid JSON in request body: ", body:sub(1, 200))
+        ngx.say(cjson.encode({
+            error = "Invalid JSON",
+            details = "Failed to parse request body as JSON"
+        }))
+        return
+    end
+    
+    local user_message = request_data.message or ""
+    local files = request_data.files or {}
+    local chat_id = request_data.chat_id  -- Now accepts chat_id from client
+    
+    -- Enhanced validation with file upload support
+    if user_message == "" and #files == 0 then
+        ngx.status = 400
+        ngx.say(cjson.encode({
+            error = "No message or files provided",
+            details = "Either message text or file attachments are required"
+        }))
+        return
+    end
+    
+    -- Log file upload information
+    if #files > 0 then
+        ngx.log(ngx.INFO, "Processing request with ", #files, " file(s)")
+        for i, file in ipairs(files) do
+            ngx.log(ngx.INFO, "File ", i, ": ", file.name or "unknown", 
+                    " (", file.size or "unknown", " bytes)")
+        end
+    end
+    
+    -- If no chat_id provided, generate one server-side
+    if not chat_id or chat_id == "" then
+        chat_id = generate_chat_id()
+        ngx.log(ngx.INFO, "Generated new chat_id: ", chat_id)
+    end
+    
+    -- Connect to Redis
+    local redis = redis_client.connect()
+    if not redis then
+        ngx.status = 500
+        ngx.say(cjson.encode({
+            error = "Redis connection failed",
+            details = "Unable to connect to Redis database"
+        }))
+        return
+    end
+    
+    -- Generate admin message ID and save it
+    local user_message_id = generate_message_id(redis, chat_id, "user")
+    local complete_message = user_message
+    local file_context = format_files_for_context(files)
+    
+    if file_context ~= "" then
+        complete_message = complete_message .. file_context
+    end
+    
+    -- Save user message with files
+    save_message(redis, chat_id, user_message_id, "user", user_message, files, {})
+    
+    -- Get context for Ollama (last 10 messages)
+    local context_messages = get_chat_context(redis, chat_id, 10)
+    
+    -- Add current message with file context to context
+    table.insert(context_messages, {
+        role = "user",
+        content = complete_message
+    })
+    
+    -- Set headers for Server-Sent Events
+    ngx.header["Content-Type"] = "text/event-stream"
+    ngx.header["Cache-Control"] = "no-cache"
+    ngx.header["Connection"] = "keep-alive"
+    ngx.header["Access-Control-Allow-Origin"] = "*"
+    
+    -- Send chat_id to client first
+    ngx.say("data: " .. cjson.encode({chat_id = chat_id}) .. "\n")
+    ngx.flush()
+    
+    -- Create HTTP client for Ollama
+    local httpc = http.new()
+    httpc:set_timeout(300000) -- 5 minutes
+    
+    -- Prepare Ollama request
+    local ollama_data = {
+        model = MODEL_NAME,
+        messages = context_messages,
+        stream = true,
+        options = {
+            temperature = MODEL_TEMPERATURE,
+            top_p = MODEL_TOP_P,
+            top_k = MODEL_TOP_K,
+            num_ctx = MODEL_NUM_CTX,
+            num_predict = MODEL_NUM_PREDICT
+        }
+    }
+    
+    -- Log Ollama request (without full content for brevity)
+    ngx.log(ngx.INFO, "Sending request to Ollama: ", MODEL_URL, "/api/chat")
+    ngx.log(ngx.INFO, "Model: ", MODEL_NAME, ", Context messages: ", #context_messages)
+    
+    -- Send request to Ollama
+    local res, err = httpc:request_uri(MODEL_URL .. "/api/chat", {
+        method = "POST",
+        body = cjson.encode(ollama_data),
+        headers = {
+            ["Content-Type"] = "application/json"
+        }
+    })
+    
+    if not res then
+        ngx.log(ngx.ERR, "Ollama request failed: ", err)
+        ngx.say("data: " .. cjson.encode({
+            error = "Failed to connect to AI model",
+            details = err
+        }) .. "\n\n")
+        ngx.flush()
+        redis_client.close(redis)
+        return
+    end
+    
+    if res.status ~= 200 then
+        ngx.log(ngx.ERR, "Ollama returned status: ", res.status, ", body: ", res.body:sub(1, 200))
+        ngx.say("data: " .. cjson.encode({
+            error = "AI model returned error: " .. res.status,
+            details = res.body:sub(1, 200)
+        }) .. "\n\n")
+        ngx.flush()
+        redis_client.close(redis)
+        return
+    end
+    
+    -- Process streaming response
+    local full_response = ""
+    local lines = {}
+    
+    -- Split response into lines
+    for line in res.body:gmatch("[^\r\n]+") do
+        table.insert(lines, line)
+    end
+    
+    ngx.log(ngx.INFO, "Processing ", #lines, " lines from Ollama response")
+    
+    -- Process each line from Ollama
+    for _, line in ipairs(lines) do
+        if line and line ~= "" then
+            local ok_chunk, chunk_data = pcall(cjson.decode, line)
+            if ok_chunk and chunk_data.message and chunk_data.message.content then
+                local content = chunk_data.message.content
+                full_response = full_response .. content
+                
+                -- Send chunk to client
+                ngx.say("data: " .. cjson.encode({content = content}) .. "\n")
+                ngx.flush()
+                
+                if chunk_data.done then
+                    break
+                end
+            end
+        end
+    end
+    
+    -- Send completion signal
+    ngx.say("data: [DONE]\n\n")
+    ngx.flush()
+    
+    ngx.log(ngx.INFO, "Completed streaming response, total length: ", string.len(full_response))
+    
+    -- Generate JAI message ID and save response with artifacts
+    local ai_message_id = generate_message_id(redis, chat_id, "assistant")
+    
+    -- Extract and save code blocks as artifacts
+    local artifacts = extract_and_save_code_blocks(redis, chat_id, ai_message_id, full_response)
+    
+    -- Save AI message with artifact references
+    save_message(redis, chat_id, ai_message_id, "assistant", full_response, {}, artifacts)
+    
+    ngx.log(ngx.INFO, "Saved AI response as message: ", ai_message_id, 
+            " with ", #artifacts, " code artifacts")
+    
+    redis_client.close(redis)
+    httpc:close()
+end
+
+return _Mdata = {
         id = message_id,
         role = role,
         content = content,
@@ -183,6 +468,50 @@ local function get_chat_context(redis, chat_id, context_limit)
     return context_messages
 end
 
+-- ENHANCED: Read request body with file upload support
+local function read_request_body()
+    -- Force body reading
+    ngx.req.read_body()
+    local body = ngx.req.get_body_data()
+
+    -- Handle large uploads via temp files
+    if not body then
+        local body_file = ngx.req.get_body_file()
+        if body_file then
+            ngx.log(ngx.INFO, "Reading large request body from temp file: ", body_file)
+            local file = io.open(body_file, "r")
+            if file then
+                body = file:read("*all")
+                file:close()
+                ngx.log(ngx.INFO, "Successfully read body from temp file, size: ", string.len(body))
+            else
+                ngx.log(ngx.ERR, "Failed to open body temp file: ", body_file)
+            end
+        end
+    end
+
+    -- Enhanced error logging
+    if not body or body == "" then
+        local content_length = ngx.var.http_content_length or "unknown"
+        local content_type = ngx.var.http_content_type or "unknown"
+        local request_method = ngx.var.request_method or "unknown"
+        
+        ngx.log(ngx.ERR, "No request body received. Method: ", request_method,
+                ", Content-Length: ", content_length, 
+                ", Content-Type: ", content_type)
+        
+        return nil, {
+            error = "No request body received",
+            method = request_method,
+            content_length = content_length,
+            content_type = content_type
+        }
+    end
+
+    ngx.log(ngx.INFO, "Successfully read request body, size: ", string.len(body))
+    return body, nil
+end
+
 -- Serve the chat HTML page
 function _M.serve_chat_page()
     local file = io.open("/usr/local/openresty/nginx/static/chat.html", "r")
@@ -199,7 +528,7 @@ function _M.serve_chat_page()
     ngx.say(content)
 end
 
--- NEW: Create new chat endpoint
+-- Create new chat endpoint
 function _M.handle_create_chat()
     if ngx.req.get_method() ~= "POST" then
         ngx.status = 405
@@ -446,12 +775,10 @@ function _M.handle_clear_chat()
     
     ngx.header["Content-Type"] = "application/json"
     
-    ngx.req.read_body()
-    local body = ngx.req.get_body_data()
-    
+    local body, error_info = read_request_body()
     if not body then
         ngx.status = 400
-        ngx.say(cjson.encode({error = "No request body"}))
+        ngx.say(cjson.encode(error_info))
         return
     end
     
@@ -519,12 +846,10 @@ function _M.handle_delete_chat()
     
     ngx.header["Content-Type"] = "application/json"
     
-    ngx.req.read_body()
-    local body = ngx.req.get_body_data()
-    
+    local body, error_info = read_request_body()
     if not body then
         ngx.status = 400
-        ngx.say(cjson.encode({error = "No request body"}))
+        ngx.say(cjson.encode(error_info))
         return
     end
     
@@ -551,255 +876,4 @@ function _M.handle_delete_chat()
     local counter_admin_key = "chat:counter:" .. USER_ID .. ":" .. chat_id .. ":admin"
     local counter_jai_key = "chat:counter:" .. USER_ID .. ":" .. chat_id .. ":jai"
     
-    local message_ids = redis:lrange(chat_messages_key, 0, -1)
-    local artifact_ids = redis:lrange(chat_artifacts_key, 0, -1)
-    
-    local deleted_items = 0
-    
-    -- Delete individual messages
-    if message_ids and type(message_ids) == "table" then
-        for _, message_id in ipairs(message_ids) do
-            local message_key = "message:" .. USER_ID .. ":" .. chat_id .. ":" .. message_id
-            deleted_items = deleted_items + redis:del(message_key)
-        end
-    end
-    
-    -- Delete individual artifacts
-    if artifact_ids and type(artifact_ids) == "table" then
-        for _, artifact_id in ipairs(artifact_ids) do
-            local artifact_key = "artifact:" .. USER_ID .. ":" .. chat_id .. ":" .. artifact_id
-            deleted_items = deleted_items + redis:del(artifact_key)
-        end
-    end
-    
-    -- Delete all chat keys
-    deleted_items = deleted_items + redis:del(chat_messages_key)
-    deleted_items = deleted_items + redis:del(chat_artifacts_key)
-    deleted_items = deleted_items + redis:del(chat_meta_key)
-    deleted_items = deleted_items + redis:del(counter_admin_key)
-    deleted_items = deleted_items + redis:del(counter_jai_key)
-    
-    redis_client.close(redis)
-    
-    ngx.say(cjson.encode({
-        success = true,
-        deleted_count = deleted_items
-    }))
-end
-
--- Delete all chats for a user
-function _M.handle_delete_all_chats()
-    if ngx.req.get_method() ~= "POST" then
-        ngx.status = 405
-        ngx.say(cjson.encode({error = "Method not allowed"}))
-        return
-    end
-    
-    ngx.header["Content-Type"] = "application/json"
-    
-    local redis = redis_client.connect()
-    if not redis then
-        ngx.status = 500
-        ngx.say(cjson.encode({error = "Redis connection failed"}))
-        return
-    end
-    
-    local deleted_count = 0
-    
-    -- Get all patterns for this user
-    local patterns = {
-        "message:" .. USER_ID .. ":*",
-        "artifact:" .. USER_ID .. ":*",
-        "chat:messages:" .. USER_ID .. ":*",
-        "chat:artifacts:" .. USER_ID .. ":*",
-        "chat:meta:" .. USER_ID .. ":*",
-        "chat:counter:" .. USER_ID .. ":*"
-    }
-    
-    for _, pattern in ipairs(patterns) do
-        local keys = redis:keys(pattern)
-        if keys and type(keys) == "table" then
-            for _, key in ipairs(keys) do
-                deleted_count = deleted_count + redis:del(key)
-            end
-        end
-    end
-    
-    redis_client.close(redis)
-    
-    ngx.say(cjson.encode({
-        success = true,
-        deleted_count = deleted_count
-    }))
-end
-
--- Handle streaming chat with proper Redis storage and artifact generation
-function _M.handle_chat_stream()
-    if ngx.req.get_method() ~= "POST" then
-        ngx.status = 405
-        ngx.say("Method not allowed")
-        return
-    end
-    
-    -- Parse request body
-    ngx.req.read_body()
-    local body = ngx.req.get_body_data()
-    
-    if not body then
-        ngx.status = 400
-        ngx.say("No request body")
-        return
-    end
-    
-    local ok, request_data = pcall(cjson.decode, body)
-    if not ok then
-        ngx.status = 400
-        ngx.say("Invalid JSON")
-        return
-    end
-    
-    local user_message = request_data.message or ""
-    local files = request_data.files or {}
-    local chat_id = request_data.chat_id  -- Now accepts chat_id from client
-    
-    -- If no chat_id provided, generate one server-side
-    if not chat_id or chat_id == "" then
-        chat_id = generate_chat_id()
-        ngx.log(ngx.INFO, "Generated new chat_id: ", chat_id)
-    end
-    
-    -- If no message and no files, return error
-    if user_message == "" and #files == 0 then
-        ngx.status = 400
-        ngx.say("No message or files provided")
-        return
-    end
-    
-    -- Connect to Redis
-    local redis = redis_client.connect()
-    if not redis then
-        ngx.status = 500
-        ngx.say("Redis connection failed")
-        return
-    end
-    
-    -- Generate admin message ID and save it
-    local user_message_id = generate_message_id(redis, chat_id, "user")
-    local complete_message = user_message
-    local file_context = format_files_for_context(files)
-    
-    if file_context ~= "" then
-        complete_message = complete_message .. file_context
-    end
-    
-    -- Save user message
-    save_message(redis, chat_id, user_message_id, "user", user_message, files, {})
-    
-    -- Get context for Ollama (last 10 messages)
-    local context_messages = get_chat_context(redis, chat_id, 10)
-    
-    -- Add current message with file context to context
-    table.insert(context_messages, {
-        role = "user",
-        content = complete_message
-    })
-    
-    -- Set headers for Server-Sent Events
-    ngx.header["Content-Type"] = "text/event-stream"
-    ngx.header["Cache-Control"] = "no-cache"
-    ngx.header["Connection"] = "keep-alive"
-    ngx.header["Access-Control-Allow-Origin"] = "*"
-    
-    -- Send chat_id to client first
-    ngx.say("data: " .. cjson.encode({chat_id = chat_id}) .. "\n")
-    ngx.flush()
-    
-    -- Create HTTP client for Ollama
-    local httpc = http.new()
-    httpc:set_timeout(300000) -- 5 minutes
-    
-    -- Prepare Ollama request
-    local ollama_data = {
-        model = MODEL_NAME,
-        messages = context_messages,
-        stream = true,
-        options = {
-            temperature = MODEL_TEMPERATURE,
-            top_p = MODEL_TOP_P,
-            top_k = MODEL_TOP_K,
-            num_ctx = MODEL_NUM_CTX,
-            num_predict = MODEL_NUM_PREDICT
-        }
-    }
-    
-    -- Send request to Ollama
-    local res, err = httpc:request_uri(MODEL_URL .. "/api/chat", {
-        method = "POST",
-        body = cjson.encode(ollama_data),
-        headers = {
-            ["Content-Type"] = "application/json"
-        }
-    })
-    
-    if not res then
-        ngx.log(ngx.ERR, "Ollama request failed: ", err)
-        ngx.say("data: " .. cjson.encode({error = "Failed to connect to AI model"}) .. "\n\n")
-        ngx.flush()
-        redis_client.close(redis)
-        return
-    end
-    
-    if res.status ~= 200 then
-        ngx.log(ngx.ERR, "Ollama returned status: ", res.status)
-        ngx.say("data: " .. cjson.encode({error = "AI model returned error: " .. res.status}) .. "\n\n")
-        ngx.flush()
-        redis_client.close(redis)
-        return
-    end
-    
-    -- Process streaming response
-    local full_response = ""
-    local lines = {}
-    
-    -- Split response into lines
-    for line in res.body:gmatch("[^\r\n]+") do
-        table.insert(lines, line)
-    end
-    
-    -- Process each line from Ollama
-    for _, line in ipairs(lines) do
-        if line and line ~= "" then
-            local ok_chunk, chunk_data = pcall(cjson.decode, line)
-            if ok_chunk and chunk_data.message and chunk_data.message.content then
-                local content = chunk_data.message.content
-                full_response = full_response .. content
-                
-                -- Send chunk to client
-                ngx.say("data: " .. cjson.encode({content = content}) .. "\n")
-                ngx.flush()
-                
-                if chunk_data.done then
-                    break
-                end
-            end
-        end
-    end
-    
-    -- Send completion signal
-    ngx.say("data: [DONE]\n\n")
-    ngx.flush()
-    
-    -- Generate JAI message ID and save response with artifacts
-    local ai_message_id = generate_message_id(redis, chat_id, "assistant")
-    
-    -- Extract and save code blocks as artifacts
-    local artifacts = extract_and_save_code_blocks(redis, chat_id, ai_message_id, full_response)
-    
-    -- Save AI message with artifact references
-    save_message(redis, chat_id, ai_message_id, "assistant", full_response, {}, artifacts)
-    
-    redis_client.close(redis)
-    httpc:close()
-end
-
-return _M
+    local message_
