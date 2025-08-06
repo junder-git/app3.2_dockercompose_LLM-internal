@@ -4,14 +4,15 @@ local utils = require "chat_utils"
 
 local _M = {}
 
--- Create HTTP client for Ollama requests
+-- Create HTTP client for Ollama requests with no timeout limits
 function _M.create_client()
     local httpc = http.new()
-    httpc:set_timeout(300000) -- 5 minutes timeout for AI responses
+    -- FIXED: Remove timeout limits to allow full AI responses
+    httpc:set_timeout(0) -- No timeout - let AI complete fully
     return httpc
 end
 
--- Prepare Ollama request payload
+-- Prepare Ollama request payload with unlimited response length
 function _M.prepare_request(context_messages, options)
     local request_data = {
         model = utils.MODEL_NAME,
@@ -22,27 +23,32 @@ function _M.prepare_request(context_messages, options)
             top_p = options and options.top_p or utils.MODEL_TOP_P,
             top_k = options and options.top_k or utils.MODEL_TOP_K,
             num_ctx = options and options.num_ctx or utils.MODEL_NUM_CTX,
-            num_predict = options and options.num_predict or utils.MODEL_NUM_PREDICT
+            -- ENHANCED: Allow unlimited response length
+            num_predict = -1, -- -1 means no limit, let AI complete fully
+            repeat_penalty = options and options.repeat_penalty or utils.MODEL_REPEAT_PENALTY or 1.1,
+            stop = {} -- No stop sequences to prevent premature truncation
         }
     }
     
     utils.log_info("chat_ollama", "prepare_request", {
         model = request_data.model,
         message_count = #context_messages,
-        options = request_data.options
+        options = request_data.options,
+        unlimited_response = true
     })
     
     return request_data
 end
 
--- Send request to Ollama API
+-- Send request to Ollama API with enhanced error handling
 function _M.send_request(httpc, request_data)
     local url = utils.MODEL_URL .. "/api/chat"
     
     utils.log_info("chat_ollama", "send_request", {
         url = url,
         model = request_data.model,
-        stream = request_data.stream
+        stream = request_data.stream,
+        unlimited_mode = true
     })
     
     local res, err = httpc:request_uri(url, {
@@ -50,7 +56,11 @@ function _M.send_request(httpc, request_data)
         body = cjson.encode(request_data),
         headers = {
             ["Content-Type"] = "application/json"
-        }
+        },
+        -- ENHANCED: No timeouts for complete responses
+        read_timeout = 0,
+        send_timeout = 0,
+        connect_timeout = 30000 -- Only connection timeout
     })
     
     if not res then
@@ -79,7 +89,7 @@ function _M.send_request(httpc, request_data)
     return res, nil
 end
 
--- Parse streaming response from Ollama
+-- ENHANCED: Parse streaming response with completion detection
 function _M.parse_streaming_response(response_body)
     local full_response = ""
     local lines = {}
@@ -94,23 +104,40 @@ function _M.parse_streaming_response(response_body)
     })
     
     local chunks = {}
+    local is_complete = false
+    local completion_reason = "unknown"
     
     -- Process each line from Ollama
     for _, line in ipairs(lines) do
         if line and line ~= "" then
             local ok_chunk, chunk_data = pcall(cjson.decode, line)
-            if ok_chunk and chunk_data.message and chunk_data.message.content then
-                local content = chunk_data.message.content
-                full_response = full_response .. content
+            if ok_chunk and chunk_data.message then
+                local content = chunk_data.message.content or ""
                 
-                table.insert(chunks, {
-                    content = content,
-                    done = chunk_data.done or false
-                })
+                if content ~= "" then
+                    full_response = full_response .. content
+                    
+                    table.insert(chunks, {
+                        content = content,
+                        done = chunk_data.done or false
+                    })
+                end
                 
+                -- Check for completion indicators
                 if chunk_data.done then
+                    is_complete = true
+                    completion_reason = chunk_data.done_reason or "finished"
+                    
+                    -- Log completion details
+                    utils.log_info("chat_ollama", "response_complete", {
+                        reason = completion_reason,
+                        total_length = #full_response,
+                        chunk_count = #chunks
+                    })
+                    
                     break
                 end
+                
             elseif ok_chunk and chunk_data.error then
                 utils.log_error("chat_ollama", "parse_streaming_response", "Ollama error", {
                     error = chunk_data.error
@@ -120,12 +147,88 @@ function _M.parse_streaming_response(response_body)
         end
     end
     
+    -- ENHANCED: Check if response seems truncated
+    local seems_truncated = false
+    if not is_complete and #full_response > 0 then
+        -- Check for common truncation indicators
+        local last_part = string.sub(full_response, -50)
+        if string.find(last_part, "%.%.%.$") or 
+           string.find(last_part, "%[continued%]") or
+           string.find(last_part, "%[truncated%]") then
+            seems_truncated = true
+        end
+    end
+    
     utils.log_info("chat_ollama", "parse_streaming_response", {
         full_response_length = #full_response,
-        chunk_count = #chunks
+        chunk_count = #chunks,
+        is_complete = is_complete,
+        completion_reason = completion_reason,
+        seems_truncated = seems_truncated
     })
     
-    return full_response, chunks, nil
+    return full_response, chunks, nil, {
+        is_complete = is_complete,
+        completion_reason = completion_reason,
+        seems_truncated = seems_truncated
+    }
+end
+
+-- ENHANCED: Stream chat completion with full response handling
+function _M.stream_chat(context_messages, options)
+    -- Validate configuration
+    local config_valid, config_issues = _M.validate_config()
+    if not config_valid then
+        return nil, "Configuration error: " .. table.concat(config_issues, ", ")
+    end
+    
+    -- Create HTTP client with no timeouts
+    local httpc = _M.create_client()
+    
+    -- Prepare request for unlimited response
+    local request_data = _M.prepare_request(context_messages, options)
+    
+    -- Send request
+    local response, err = _M.send_request(httpc, request_data)
+    if not response then
+        httpc:close()
+        return nil, err
+    end
+    
+    -- Parse streaming response with completion detection
+    local full_response, chunks, parse_err, completion_info = _M.parse_streaming_response(response.body)
+    httpc:close()
+    
+    if parse_err then
+        return nil, parse_err
+    end
+    
+    -- ENHANCED: Return completion information
+    return {
+        full_response = full_response,
+        chunks = chunks,
+        model = utils.MODEL_NAME,
+        options = request_data.options,
+        completion_info = completion_info or {
+            is_complete = true,
+            completion_reason = "finished"
+        }
+    }, nil
+end
+
+-- NEW: Check if response needs continuation
+function _M.needs_continuation(response_result)
+    if not response_result or not response_result.completion_info then
+        return false
+    end
+    
+    local info = response_result.completion_info
+    return not info.is_complete or info.seems_truncated
+end
+
+-- NEW: Generate continuation prompt
+function _M.create_continuation_prompt(original_response)
+    return "Please continue your previous response from where you left off. Complete your full answer without repeating what you already said."
 end
 
 -- Validate Ollama model configuration
@@ -171,7 +274,9 @@ function _M.health_check()
         method = "GET",
         headers = {
             ["Content-Type"] = "application/json"
-        }
+        },
+        connect_timeout = 30000,
+        read_timeout = 10000
     })
     
     httpc:close()
@@ -223,77 +328,24 @@ function _M.health_check()
     utils.log_info("chat_ollama", "health_check", {
         status = "healthy",
         model = utils.MODEL_NAME,
-        available_models_count = models_data.models and #models_data.models or 0
+        available_models_count = models_data.models and #models_data.models or 0,
+        unlimited_responses = true
     })
     
     return true, "Ollama is healthy and model is available"
 end
 
--- Stream chat completion
-function _M.stream_chat(context_messages, options)
-    -- Validate configuration
-    local config_valid, config_issues = _M.validate_config()
-    if not config_valid then
-        return nil, "Configuration error: " .. table.concat(config_issues, ", ")
-    end
-    
-    -- Create HTTP client
-    local httpc = _M.create_client()
-    
-    -- Prepare request
-    local request_data = _M.prepare_request(context_messages, options)
-    
-    -- Send request
-    local response, err = _M.send_request(httpc, request_data)
-    if not response then
-        httpc:close()
-        return nil, err
-    end
-    
-    -- Parse streaming response
-    local full_response, chunks, parse_err = _M.parse_streaming_response(response.body)
-    httpc:close()
-    
-    if parse_err then
-        return nil, parse_err
-    end
-    
+-- Get default model options for unlimited responses
+function _M.get_default_options()
     return {
-        full_response = full_response,
-        chunks = chunks,
-        model = utils.MODEL_NAME,
-        options = request_data.options
-    }, nil
-end
-
--- Get model information
-function _M.get_model_info()
-    local httpc = _M.create_client()
-    
-    local res, err = httpc:request_uri(utils.MODEL_URL .. "/api/show", {
-        method = "POST",
-        body = cjson.encode({ name = utils.MODEL_NAME }),
-        headers = {
-            ["Content-Type"] = "application/json"
-        }
-    })
-    
-    httpc:close()
-    
-    if not res then
-        return nil, "Failed to get model info: " .. (err or "unknown error")
-    end
-    
-    if res.status ~= 200 then
-        return nil, "HTTP " .. res.status .. " from Ollama"
-    end
-    
-    local ok, model_data = pcall(cjson.decode, res.body)
-    if not ok then
-        return nil, "Invalid response from Ollama"
-    end
-    
-    return model_data, nil
+        temperature = utils.MODEL_TEMPERATURE,
+        top_p = utils.MODEL_TOP_P,
+        top_k = utils.MODEL_TOP_K,
+        num_ctx = utils.MODEL_NUM_CTX,
+        num_predict = -1, -- Unlimited response length
+        repeat_penalty = utils.MODEL_REPEAT_PENALTY or 1.1,
+        stop = {} -- No stop sequences
+    }
 end
 
 -- Format error message for user display
@@ -330,72 +382,6 @@ function _M.format_error(error_msg)
     
     -- Generic fallback
     return "AI service error: " .. error_msg
-end
-
--- Prepare context with file content
-function _M.prepare_context_with_files(messages, files)
-    local context_messages = {}
-    
-    -- Copy existing messages
-    for _, msg in ipairs(messages) do
-        table.insert(context_messages, {
-            role = msg.role,
-            content = msg.content
-        })
-    end
-    
-    -- Add file context to the last user message if files are provided
-    if files and #files > 0 then
-        local file_context = utils.format_files_for_context(files)
-        if file_context ~= "" and #context_messages > 0 then
-            local last_message = context_messages[#context_messages]
-            if last_message.role == "user" then
-                last_message.content = last_message.content .. file_context
-            end
-        end
-    end
-    
-    return context_messages
-end
-
--- Get default model options
-function _M.get_default_options()
-    return {
-        temperature = utils.MODEL_TEMPERATURE,
-        top_p = utils.MODEL_TOP_P,
-        top_k = utils.MODEL_TOP_K,
-        num_ctx = utils.MODEL_NUM_CTX,
-        num_predict = utils.MODEL_NUM_PREDICT
-    }
-end
-
--- Create a simple completion (non-streaming)
-function _M.simple_completion(prompt, options)
-    local context_messages = {
-        { role = "user", content = prompt }
-    }
-    
-    local request_data = _M.prepare_request(context_messages, options)
-    request_data.stream = false -- Override for simple completion
-    
-    local httpc = _M.create_client()
-    local response, err = _M.send_request(httpc, request_data)
-    httpc:close()
-    
-    if not response then
-        return nil, err
-    end
-    
-    local ok, result = pcall(cjson.decode, response.body)
-    if not ok then
-        return nil, "Invalid response from Ollama"
-    end
-    
-    if result.message and result.message.content then
-        return result.message.content, nil
-    end
-    
-    return nil, "No content in Ollama response"
 end
 
 return _M

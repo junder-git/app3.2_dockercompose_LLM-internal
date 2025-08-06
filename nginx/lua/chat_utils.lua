@@ -8,14 +8,16 @@ _M.MAX_FILE_SIZE = 50 * 1024 * 1024 -- 50MB
 _M.MAX_TOTAL_SIZE = 100 * 1024 * 1024 -- 100MB
 _M.MAX_FILES = 10
 
--- Model configuration from environment
+-- ENHANCED: Model configuration for unlimited responses
 _M.MODEL_URL = os.getenv("MODEL_URL") or "http://ollama:11434"
 _M.MODEL_NAME = os.getenv("MODEL_NAME") or "devstral"
 _M.MODEL_TEMPERATURE = tonumber(os.getenv("MODEL_TEMPERATURE") or "0.7")
 _M.MODEL_TOP_P = tonumber(os.getenv("MODEL_TOP_P") or "0.9")
 _M.MODEL_TOP_K = tonumber(os.getenv("MODEL_TOP_K") or "40")
-_M.MODEL_NUM_CTX = tonumber(os.getenv("MODEL_NUM_CTX") or "4096")
-_M.MODEL_NUM_PREDICT = tonumber(os.getenv("MODEL_NUM_PREDICT") or "512")
+_M.MODEL_NUM_CTX = tonumber(os.getenv("MODEL_NUM_CTX") or "8192") -- Increased context window
+_M.MODEL_NUM_PREDICT = -1 -- ENHANCED: -1 means unlimited response length
+_M.MODEL_REPEAT_PENALTY = tonumber(os.getenv("MODEL_REPEAT_PENALTY") or "1.1")
+_M.MODEL_REPEAT_LAST_N = tonumber(os.getenv("MODEL_REPEAT_LAST_N") or "64")
 
 -- Generate chat ID in chat(n) format where n is timestamp
 function _M.generate_chat_id()
@@ -24,7 +26,6 @@ function _M.generate_chat_id()
 end
 
 -- Generate message ID using admin(n) and jai(n) format
--- Note: This function now takes a Redis connection, not the redis module
 function _M.generate_message_id(redis_connection, chat_id, message_type)
     local id_type = message_type == "user" and "admin" or "jai"
     local counter_key = "chat:counter:" .. _M.USER_ID .. ":" .. chat_id .. ":" .. id_type
@@ -61,9 +62,9 @@ function _M.format_files_for_context(files)
     return file_context
 end
 
--- Enhanced request body reading with file upload support
+-- ENHANCED: Request body reading with no size limits for AI responses
 function _M.read_request_body()
-    -- Force body reading
+    -- Force body reading with unlimited size
     ngx.req.read_body()
     local body = ngx.req.get_body_data()
 
@@ -253,20 +254,21 @@ function _M.format_file_size(bytes)
     end
 end
 
--- Log structured information
+-- ENHANCED: Log structured information with unlimited response context
 function _M.log_info(module, action, details)
     local log_data = {
         module = module,
         action = action,
         details = details,
         timestamp = ngx.time(),
-        user_id = _M.USER_ID
+        user_id = _M.USER_ID,
+        unlimited_mode = true
     }
     
     ngx.log(ngx.INFO, cjson.encode(log_data))
 end
 
--- Log errors with context
+-- ENHANCED: Log errors with unlimited response context
 function _M.log_error(module, action, error_msg, context)
     local log_data = {
         module = module,
@@ -274,7 +276,8 @@ function _M.log_error(module, action, error_msg, context)
         error = error_msg,
         context = context or {},
         timestamp = ngx.time(),
-        user_id = _M.USER_ID
+        user_id = _M.USER_ID,
+        unlimited_mode = true
     }
     
     ngx.log(ngx.ERR, cjson.encode(log_data))
@@ -328,6 +331,97 @@ function _M.merge_tables(t1, t2)
     end
     
     return result
+end
+
+-- NEW: Check if response appears to be truncated
+function _M.appears_truncated(content)
+    if not content or content == "" then
+        return false
+    end
+    
+    local last_part = string.sub(content, -100)
+    
+    -- Check for common truncation indicators
+    local truncation_patterns = {
+        "%.%.%.$",           -- Ends with "..."
+        "%[continued%]$",    -- Ends with "[continued]"
+        "%[truncated%]$",    -- Ends with "[truncated]"
+        "%[%.%.%.]$",        -- Ends with "[...]"
+        "%(continued%)$",    -- Ends with "(continued)"
+        "%.%.%.%s*$",        -- Ends with "..." and whitespace
+        "%-%-%s*$"           -- Ends with "--" (incomplete)
+    }
+    
+    for _, pattern in ipairs(truncation_patterns) do
+        if string.find(last_part, pattern) then
+            return true
+        end
+    end
+    
+    return false
+end
+
+-- NEW: Get model configuration for unlimited responses
+function _M.get_unlimited_model_config()
+    return {
+        model = _M.MODEL_NAME,
+        temperature = _M.MODEL_TEMPERATURE,
+        top_p = _M.MODEL_TOP_P,
+        top_k = _M.MODEL_TOP_K,
+        num_ctx = _M.MODEL_NUM_CTX,
+        num_predict = _M.MODEL_NUM_PREDICT, -- -1 for unlimited
+        repeat_penalty = _M.MODEL_REPEAT_PENALTY,
+        repeat_last_n = _M.MODEL_REPEAT_LAST_N,
+        stop = {} -- No stop sequences to prevent truncation
+    }
+end
+
+-- NEW: Check if content needs continuation
+function _M.needs_continuation(content, completion_reason)
+    if not content then
+        return true
+    end
+    
+    -- Check completion reason
+    if completion_reason and completion_reason ~= "finished" then
+        return true
+    end
+    
+    -- Check for truncation indicators
+    if _M.appears_truncated(content) then
+        return true
+    end
+    
+    -- Check if content ends abruptly (no proper sentence ending)
+    local last_part = string.sub(content, -50)
+    if not string.find(last_part, "[%.!%?]%s*$") and 
+       not string.find(last_part, "```%s*$") and  -- Code block end
+       not string.find(last_part, "%*%*%s*$") and -- Bold text end
+       string.len(content) > 100 then
+        return true
+    end
+    
+    return false
+end
+
+-- NEW: Create continuation context
+function _M.create_continuation_context(original_context, incomplete_response)
+    local continuation_context = {}
+    
+    -- Add original context (excluding incomplete response)
+    for i, message in ipairs(original_context) do
+        if i < #original_context or message.role == "user" then
+            table.insert(continuation_context, message)
+        end
+    end
+    
+    -- Add continuation prompt
+    table.insert(continuation_context, {
+        role = "user",
+        content = "Please continue your previous response from where you left off. Complete your full answer without repeating what you already said."
+    })
+    
+    return continuation_context
 end
 
 return _M

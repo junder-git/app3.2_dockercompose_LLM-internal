@@ -1,4 +1,4 @@
--- Refactored Chat Handler - Main Request Router & Coordinator
+-- Enhanced Chat Handler - With continuation support and no timeouts
 local utils = require "chat_utils"
 local redis = require "chat_redis"
 local ollama = require "chat_ollama"
@@ -40,7 +40,7 @@ function _M.handle_create_chat()
     view.render_success(result, "Chat created successfully", 201)
 end
 
--- Enhanced streaming chat endpoint with comprehensive processing
+-- ENHANCED: Streaming chat endpoint with unlimited AI responses
 function _M.handle_chat_stream()
     if ngx.req.get_method() ~= "POST" then
         return view.handle_method_not_allowed({"POST"})
@@ -125,7 +125,7 @@ function _M.handle_chat_stream()
         context_messages = {}
     end
     
-    -- Save user message to Redis - FIXED: Use Redis execute pattern
+    -- Save user message to Redis
     local user_message_id
     local save_result, save_err = redis.execute(function(red)
         user_message_id = utils.generate_message_id(red, chat_id, "user")
@@ -140,8 +140,8 @@ function _M.handle_chat_stream()
         })
     end
     
-    -- Handle streaming response
-    local ai_response, stream_err = sse.handle_streaming_chat(
+    -- ENHANCED: Handle streaming response with continuation support
+    local ai_response, stream_err, completion_info = sse.handle_streaming_chat(
         chat_id, 
         user_message, 
         processed_files, 
@@ -157,7 +157,7 @@ function _M.handle_chat_stream()
         return
     end
     
-    -- Save AI response and extract artifacts - FIXED: Use Redis execute pattern
+    -- Save AI response and extract artifacts
     local ai_message_id
     local ai_save_result, ai_save_err = redis.execute(function(red)
         ai_message_id = utils.generate_message_id(red, chat_id, "assistant")
@@ -172,7 +172,7 @@ function _M.handle_chat_stream()
             message_id = ai_message_id
         })
     else
-        -- Get artifact count for logging (this is a bit of a workaround)
+        -- Log completion with continuation info
         local artifact_count = 0
         if ai_response then
             for _ in string.gmatch(ai_response, "```[%w]*\n.-\n```") do
@@ -185,8 +185,125 @@ function _M.handle_chat_stream()
             user_message_id = user_message_id,
             ai_message_id = ai_message_id,
             artifact_count = artifact_count,
-            response_length = #ai_response
+            response_length = #ai_response,
+            is_complete = completion_info and completion_info.is_complete or true,
+            needs_continuation = completion_info and not completion_info.is_complete or false
         })
+    end
+end
+
+-- NEW: Handle chat continuation for incomplete responses
+function _M.handle_chat_continuation()
+    if ngx.req.get_method() ~= "POST" then
+        return view.handle_method_not_allowed({"POST"})
+    end
+    
+    if ngx.req.get_method() == "OPTIONS" then
+        return utils.handle_options_request()
+    end
+    
+    -- Validate SSE connection
+    local sse_valid, sse_err = sse.validate_connection()
+    if not sse_valid then
+        return view.render_api_error(400, "SSE not supported", sse_err)
+    end
+    
+    -- Read and parse request
+    local body, body_err = utils.read_request_body()
+    if not body then
+        return view.render_api_error(400, "No request body", body_err.error)
+    end
+    
+    local request_data, parse_err = utils.parse_json_request(body)
+    if not request_data then
+        return view.render_api_error(400, "Invalid JSON", parse_err.error)
+    end
+    
+    local chat_id = request_data.chat_id
+    local previous_response = request_data.previous_response or ""
+    
+    -- Validate input
+    if not chat_id or chat_id == "" then
+        return view.render_api_error(400, "Missing chat_id")
+    end
+    
+    if not utils.is_valid_chat_id(chat_id) then
+        return view.render_api_error(400, "Invalid chat ID format")
+    end
+    
+    if previous_response == "" then
+        return view.render_api_error(400, "Missing previous_response")
+    end
+    
+    -- Get chat context from Redis
+    local context_messages, context_err = redis.get_chat_context(chat_id, 10)
+    if not context_messages then
+        utils.log_error("chat_handler", "get_continuation_context", "Failed to get chat context", {
+            error = context_err,
+            chat_id = chat_id
+        })
+        return view.render_api_error(500, "Failed to get chat context", context_err)
+    end
+    
+    utils.log_info("chat_handler", "handle_continuation", {
+        chat_id = chat_id,
+        previous_response_length = #previous_response,
+        context_size = #context_messages
+    })
+    
+    -- Handle continuation streaming
+    local continued_response, continuation_err, completion_info = sse.handle_continuation_request(
+        chat_id,
+        previous_response,
+        context_messages,
+        ollama
+    )
+    
+    if not continued_response then
+        utils.log_error("chat_handler", "continuation_failed", "Continuation failed", {
+            error = continuation_err,
+            chat_id = chat_id
+        })
+        return
+    end
+    
+    -- Update the last AI message with the combined response
+    local messages, msg_err = redis.get_chat_messages(chat_id, 5)
+    if messages and #messages > 0 then
+        -- Find the last assistant message
+        local last_ai_message = nil
+        for i = #messages, 1, -1 do
+            if messages[i].role == "assistant" then
+                last_ai_message = messages[i]
+                break
+            end
+        end
+        
+        if last_ai_message then
+            -- Update the message with combined response
+            local update_result, update_err = redis.execute(function(red)
+                -- Extract new artifacts from the combined response
+                local artifact_ids = artifacts.extract_and_save_code_blocks(red, chat_id, last_ai_message.id, continued_response)
+                
+                -- Update message content
+                return redis.save_message(chat_id, last_ai_message.id, "assistant", continued_response, {}, artifact_ids)
+            end)
+            
+            if not update_result then
+                utils.log_error("chat_handler", "update_continued_message", "Failed to update message", {
+                    error = update_err,
+                    chat_id = chat_id,
+                    message_id = last_ai_message.id
+                })
+            else
+                utils.log_info("chat_handler", "continuation_complete", {
+                    chat_id = chat_id,
+                    message_id = last_ai_message.id,
+                    final_response_length = #continued_response,
+                    is_complete = completion_info and completion_info.is_complete or true
+                })
+            end
+        end
     end
 end
 

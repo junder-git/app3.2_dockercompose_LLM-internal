@@ -3,14 +3,15 @@ local utils = require "chat_utils"
 
 local _M = {}
 
--- Set up Server-Sent Events headers
+-- Set up Server-Sent Events headers with no timeout limits
 function _M.setup_sse_headers()
     ngx.header["Content-Type"] = "text/event-stream"
     ngx.header["Cache-Control"] = "no-cache"
     ngx.header["Connection"] = "keep-alive"
+    ngx.header["X-Accel-Buffering"] = "no" -- Disable nginx buffering for real-time streaming
     utils.set_cors_headers()
     
-    utils.log_info("chat_sse", "setup_headers", "SSE headers configured")
+    utils.log_info("chat_sse", "setup_headers", "SSE headers configured with no buffering")
 end
 
 -- Send SSE event with data
@@ -28,7 +29,7 @@ function _M.send_event(event_data, event_type)
     end
     
     ngx.say("data: " .. data_str .. "\n")
-    ngx.flush()
+    ngx.flush(true) -- Force flush for immediate delivery
     
     utils.log_info("chat_sse", "send_event", {
         event_type = event_type,
@@ -52,6 +53,16 @@ function _M.send_content_chunk(content)
     }, "content")
 end
 
+-- NEW: Send completion status with continuation info
+function _M.send_completion_status(is_complete, needs_continuation, completion_reason)
+    _M.send_event({
+        is_complete = is_complete,
+        needs_continuation = needs_continuation,
+        completion_reason = completion_reason or "finished",
+        type = "completion_status"
+    }, "completion_status")
+end
+
 -- Send error to client
 function _M.send_error(error_msg, details)
     local error_data = {
@@ -66,10 +77,22 @@ function _M.send_error(error_msg, details)
     _M.send_event(error_data, "error")
 end
 
--- Send completion signal
-function _M.send_completion()
+-- ENHANCED: Send completion signal with continuation info
+function _M.send_completion(completion_info)
+    if completion_info and not completion_info.is_complete then
+        -- Response was truncated, offer continuation
+        _M.send_event({
+            type = "continuation_needed",
+            reason = completion_info.completion_reason or "truncated",
+            message = "Response may be incomplete. Would you like me to continue?"
+        }, "continuation_needed")
+    end
+    
     _M.send_event("[DONE]", "done")
-    utils.log_info("chat_sse", "send_completion", "Stream completed")
+    utils.log_info("chat_sse", "send_completion", {
+        completed = "Stream completed",
+        needs_continuation = completion_info and not completion_info.is_complete
+    })
 end
 
 -- Send status update
@@ -82,7 +105,7 @@ function _M.send_status(status, message)
     }, "status")
 end
 
--- Stream Ollama response chunks to client
+-- ENHANCED: Stream Ollama response chunks with completion detection
 function _M.stream_ollama_response(ollama_result)
     if not ollama_result or not ollama_result.chunks then
         _M.send_error("No response from AI service")
@@ -93,17 +116,18 @@ function _M.stream_ollama_response(ollama_result)
     
     utils.log_info("chat_sse", "stream_ollama_response", {
         chunk_count = total_chunks,
-        full_response_length = ollama_result.full_response and #ollama_result.full_response or 0
+        full_response_length = ollama_result.full_response and #ollama_result.full_response or 0,
+        completion_info = ollama_result.completion_info
     })
     
-    -- Stream each chunk
+    -- Stream each chunk with minimal delay
     for i, chunk in ipairs(ollama_result.chunks) do
         if chunk.content and chunk.content ~= "" then
             _M.send_content_chunk(chunk.content)
             
-            -- Add small delay to prevent overwhelming the client
-            if i % 10 == 0 then
-                ngx.sleep(0.001) -- 1ms delay every 10 chunks
+            -- Minimal delay only every 20 chunks to prevent overwhelming
+            if i % 20 == 0 then
+                ngx.sleep(0.001) -- 1ms delay every 20 chunks
             end
         end
         
@@ -112,19 +136,31 @@ function _M.stream_ollama_response(ollama_result)
         end
     end
     
-    return true
+    -- Send completion info
+    local completion_info = ollama_result.completion_info or {
+        is_complete = true,
+        completion_reason = "finished"
+    }
+    
+    _M.send_completion_status(
+        completion_info.is_complete,
+        not completion_info.is_complete,
+        completion_info.completion_reason
+    )
+    
+    return true, completion_info
 end
 
--- Handle streaming chat request
+-- ENHANCED: Handle streaming chat request with continuation support
 function _M.handle_streaming_chat(chat_id, user_message, files, context_messages, ollama)
-    -- Set up SSE
+    -- Set up SSE with no buffering
     _M.setup_sse_headers()
     
     -- Send chat ID immediately
     _M.send_chat_id(chat_id)
     
     -- Send status update
-    _M.send_status("processing", "Generating response...")
+    _M.send_status("processing", "Generating complete response...")
     
     -- Prepare context with files
     local enhanced_context = ollama.prepare_context_with_files(context_messages, files)
@@ -146,10 +182,11 @@ function _M.handle_streaming_chat(chat_id, user_message, files, context_messages
         chat_id = chat_id,
         context_size = #enhanced_context,
         files_count = files and #files or 0,
-        message_length = #user_message
+        message_length = #user_message,
+        unlimited_mode = true
     })
     
-    -- Stream response from Ollama
+    -- Stream response from Ollama with unlimited length
     local ollama_result, err = ollama.stream_chat(enhanced_context)
     
     if not ollama_result then
@@ -162,23 +199,88 @@ function _M.handle_streaming_chat(chat_id, user_message, files, context_messages
         return nil, err
     end
     
-    -- Stream the response to client
-    local stream_success = _M.stream_ollama_response(ollama_result)
+    -- Stream the response to client with completion info
+    local stream_success, completion_info = _M.stream_ollama_response(ollama_result)
     
     if stream_success then
-        -- Send completion signal
-        _M.send_completion()
+        -- Send final completion signal with continuation info
+        _M.send_completion(completion_info)
         
         utils.log_info("chat_sse", "handle_streaming_chat", {
             chat_id = chat_id,
             response_length = #ollama_result.full_response,
-            status = "completed"
+            status = "completed",
+            is_complete = completion_info and completion_info.is_complete,
+            needs_continuation = completion_info and not completion_info.is_complete
         })
         
-        return ollama_result.full_response, nil
+        return ollama_result.full_response, nil, completion_info
     else
         _M.send_error("Failed to stream response")
-        return nil, "Stream processing failed"
+        return nil, "Stream processing failed", nil
+    end
+end
+
+-- NEW: Handle continuation request
+function _M.handle_continuation_request(chat_id, previous_response, context_messages, ollama)
+    -- Set up SSE
+    _M.setup_sse_headers()
+    
+    -- Send status
+    _M.send_status("continuing", "Continuing previous response...")
+    
+    -- Create continuation context
+    local continuation_context = {}
+    
+    -- Add previous context (excluding the last AI response to avoid repetition)
+    for i, msg in ipairs(context_messages) do
+        if i < #context_messages then -- Skip the last incomplete response
+            table.insert(continuation_context, msg)
+        end
+    end
+    
+    -- Add continuation prompt
+    local continuation_prompt = ollama.create_continuation_prompt(previous_response)
+    table.insert(continuation_context, {
+        role = "user",
+        content = continuation_prompt
+    })
+    
+    utils.log_info("chat_sse", "handle_continuation_request", {
+        chat_id = chat_id,
+        context_size = #continuation_context,
+        previous_response_length = #previous_response
+    })
+    
+    -- Stream continuation from Ollama
+    local ollama_result, err = ollama.stream_chat(continuation_context)
+    
+    if not ollama_result then
+        local user_friendly_error = ollama.format_error(err)
+        _M.send_error(user_friendly_error, err)
+        return nil, err
+    end
+    
+    -- Stream the continuation
+    local stream_success, completion_info = _M.stream_ollama_response(ollama_result)
+    
+    if stream_success then
+        _M.send_completion(completion_info)
+        
+        -- Combine with previous response
+        local combined_response = previous_response .. ollama_result.full_response
+        
+        utils.log_info("chat_sse", "handle_continuation_request", {
+            chat_id = chat_id,
+            continuation_length = #ollama_result.full_response,
+            combined_length = #combined_response,
+            status = "continued"
+        })
+        
+        return combined_response, nil, completion_info
+    else
+        _M.send_error("Failed to stream continuation")
+        return nil, "Continuation failed", nil
     end
 end
 
@@ -197,7 +299,7 @@ function _M.handle_connection_error(error_msg)
     end
 end
 
--- Send heartbeat to keep connection alive
+-- Send heartbeat to keep connection alive during long responses
 function _M.send_heartbeat()
     _M.send_event({
         type = "heartbeat",
@@ -217,17 +319,6 @@ function _M.send_progress(current, total, message)
     }, "progress")
 end
 
--- Send debug information (only in development)
-function _M.send_debug(debug_data)
-    if os.getenv("DEBUG_MODE") == "true" then
-        _M.send_event({
-            type = "debug",
-            data = debug_data,
-            timestamp = ngx.time()
-        }, "debug")
-    end
-end
-
 -- Handle client disconnect
 function _M.handle_client_disconnect()
     utils.log_info("chat_sse", "client_disconnect", "Client disconnected during streaming")
@@ -236,66 +327,15 @@ function _M.handle_client_disconnect()
     -- This would be called if ngx.eof() returns true
 end
 
--- Stream with rate limiting
-function _M.stream_with_rate_limit(chunks, max_rate)
-    max_rate = max_rate or 50 -- Default 50 chunks per second
-    local delay = 1.0 / max_rate
-    
-    for i, chunk in ipairs(chunks) do
-        _M.send_content_chunk(chunk.content)
-        
-        if i < #chunks then
-            ngx.sleep(delay)
-        end
-        
-        -- Check if client is still connected
-        if ngx.eof() then
-            _M.handle_client_disconnect()
-            return false
-        end
-    end
-    
-    return true
-end
-
--- Buffer multiple chunks before sending (for efficiency)
-function _M.stream_buffered(chunks, buffer_size)
-    buffer_size = buffer_size or 5
-    local buffer = {}
-    
-    for i, chunk in ipairs(chunks) do
-        table.insert(buffer, chunk.content)
-        
-        if #buffer >= buffer_size or i == #chunks then
-            local combined_content = table.concat(buffer, "")
-            _M.send_content_chunk(combined_content)
-            buffer = {}
-        end
-    end
-end
-
--- Stream with compression (if client supports it)
-function _M.stream_compressed(content)
-    local accept_encoding = ngx.var.http_accept_encoding or ""
-    
-    if string.find(accept_encoding, "gzip") then
-        -- Note: OpenResty doesn't have built-in gzip for SSE
-        -- This is a placeholder for future implementation
-        utils.log_info("chat_sse", "compression", "Client supports gzip but not implemented for SSE")
-    end
-    
-    _M.send_content_chunk(content)
-end
-
--- FIXED: More lenient SSE connection validation
+-- ENHANCED: More lenient SSE connection validation
 function _M.validate_connection()
     local accept = ngx.var.http_accept or ""
     local user_agent = ngx.var.http_user_agent or ""
     
-    -- FIXED: More permissive check - accept if client explicitly requests event-stream OR sends */*
+    -- Accept if client explicitly requests event-stream OR sends */* OR no Accept header
     local accepts_sse = string.find(accept, "text/event%-stream") or 
                        string.find(accept, "%*/%*") or
-                       accept == "" -- Some clients don't send Accept header
+                       accept == ""
     
     if not accepts_sse then
         utils.log_error("chat_sse", "validate_connection", "Client doesn't accept event-stream", {
@@ -308,7 +348,7 @@ function _M.validate_connection()
     return true, nil
 end
 
--- Setup SSE with validation
+-- Setup SSE with validation and no timeouts
 function _M.setup_validated_sse()
     local valid, err = _M.validate_connection()
     if not valid then

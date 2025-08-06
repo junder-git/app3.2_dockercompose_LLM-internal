@@ -2,7 +2,7 @@
 .message-content pre {
     background: #2d2d2d;
     border-radius: 8px;
-    padding: 2.5rem 1rem 1rem 1rem; /* Increased top padding from 1rem to 2.5rem */
+    padding: 2.5rem 1rem 1rem 1rem;
     overflow-x: auto;
     margin: 1rem 0;
     border: 1px solid var(--border-color);
@@ -56,36 +56,67 @@
     opacity: 1 !important;
 }
 
-/* Mobile responsive adjustments for code blocks */
-@media (max-width: 768px) {
-    .code-copy-btn {
-        opacity: 1 !important;
-        top: 4px !important;
-        right: 4px !important;
-        padding: 2px 6px !important;
-        font-size: 10px !important;
-    }
+/* ENHANCED: Split-view Code Panel Styles with Fullscreen Support */
+
+/* When code panel is open, adjust main layout */
+.app-container.code-panel-open {
+    display: grid;
+    grid-template-columns: 1fr 50%;
+    transition: grid-template-columns 0.3s ease;
 }
 
-/* Code Panel Styles - FIXED: Higher z-index to appear above modals */
+.app-container.code-panel-open .main-content {
+    overflow: hidden;
+}
 
+.app-container.code-panel-open .sidebar.collapsed {
+    transform: translateX(-100%);
+}
+
+/* ENHANCED: Code panel with split view and fullscreen support */
 .code-panel {
     position: fixed;
-    top: 0;
-    right: -50%;
+    top: 56px; /* Below navbar */
+    right: 0;
     width: 50%;
-    height: 100vh;
+    height: calc(100vh - 56px);
     background: var(--bg-secondary);
     border-left: 1px solid var(--border-color);
-    z-index: 1060; /* FIXED: Higher than Bootstrap modals (1055) */
-    transition: right 0.3s ease;
+    z-index: 1060;
     display: flex;
     flex-direction: column;
     box-shadow: -2px 0 10px rgba(0, 0, 0, 0.3);
+    transform: translateX(100%);
+    transition: transform 0.3s ease, width 0.3s ease, height 0.3s ease, top 0.3s ease;
 }
 
 .code-panel.show {
-    right: 0;
+    transform: translateX(0);
+}
+
+/* NEW: Fullscreen mode for code panel */
+.code-panel.fullscreen {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    width: 100% !important;
+    height: 100vh !important;
+    z-index: 2000 !important;
+    transform: translateX(0) !important;
+}
+
+/* ENHANCED: When panel opens, hide sidebar automatically and adjust layout */
+.code-panel.show ~ .app-container .sidebar {
+    transform: translateX(-100%);
+    transition: transform 0.3s ease;
+}
+
+.code-panel.show ~ .app-container .main-content {
+    margin-left: 0;
+    width: 50%;
+    transition: width 0.3s ease;
 }
 
 .code-panel-header {
@@ -96,6 +127,7 @@
     justify-content: space-between;
     align-items: center;
     min-height: 60px;
+    flex-shrink: 0;
 }
 
 .code-panel-title {
@@ -104,6 +136,7 @@
     gap: 0.5rem;
     font-size: 0.9rem;
     color: var(--text-primary);
+    font-weight: 600;
 }
 
 .code-panel-title i {
@@ -120,6 +153,7 @@
     flex: 1;
     overflow: auto;
     padding: 0;
+    background: var(--bg-primary);
 }
 
 .code-panel-content pre {
@@ -134,7 +168,7 @@
 
 .code-panel-content code {
     font-size: 14px;
-    line-height: 1.5;
+    line-height: 1.6;
     font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
 }
 
@@ -222,32 +256,37 @@
     border-color: var(--primary-color);
 }
 
-/* Enhanced backdrop for better visibility */
-.code-panel-backdrop {
-    position: fixed;
+/* ENHANCED: Split view adjustments */
+.app-container.split-view {
+    display: flex;
+    height: calc(100vh - 56px);
+}
+
+.app-container.split-view .main-content {
+    width: 50%;
+    flex-shrink: 0;
+}
+
+.app-container.split-view .sidebar {
+    display: none; /* Hide sidebar in split view */
+}
+
+.app-container.split-view .code-panel {
+    position: relative;
     top: 0;
-    left: 0;
-    width: 100%;
+    right: 0;
+    width: 50%;
     height: 100%;
-    background: rgba(0, 0, 0, 0.5);
-    z-index: 1059; /* FIXED: Just below code panel */
-    opacity: 0;
-    transition: opacity 0.3s ease;
-    pointer-events: none;
+    transform: translateX(0);
+    border-left: 2px solid var(--primary-color);
 }
 
-.code-panel-backdrop.show {
-    opacity: 1;
-    pointer-events: all;
-}
-
-/* Enhanced code block ID badges in messages */
+/* Enhanced code block ID badges */
 .artifact-id-badge.artifact-id-code {
-    /* Ensure high visibility and clickability */
     position: absolute !important;
     top: 8px !important;
     left: 8px !important;
-    z-index: 12 !important; /* Higher than other code block elements */
+    z-index: 12 !important;
     padding: 3px 7px !important;
     font-size: 11px !important;
     background: rgba(0, 0, 0, 0.8) !important;
@@ -269,16 +308,46 @@
     transform: scale(0.98) !important;
 }
 
+/* Resizer for split view */
+.split-view-resizer {
+    width: 4px;
+    background: var(--border-color);
+    cursor: col-resize;
+    position: relative;
+    transition: background-color 0.2s ease;
+}
+
+.split-view-resizer:hover {
+    background: var(--primary-color);
+}
+
+.split-view-resizer::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 20px;
+    height: 40px;
+    background: var(--bg-tertiary);
+    border-radius: 10px;
+    border: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
 /* Mobile responsive */
 @media (max-width: 768px) {
     .code-panel {
         width: 100%;
-        right: -100%;
-        z-index: 1060; /* Keep high z-index on mobile */
+        right: 0;
+        transform: translateX(100%);
+        z-index: 1060;
     }
     
     .code-panel.show {
-        right: 0;
+        transform: translateX(0);
     }
     
     .code-panel-content pre {
@@ -290,26 +359,63 @@
         opacity: 1;
     }
     
-    .code-panel-backdrop.show {
+    .artifact-id-badge.artifact-id-code {
+        left: 4px;
+        font-size: 10px;
+        padding: 2px 5px !important;
+    }
+    
+    /* No split view on mobile - full overlay instead */
+    .app-container.split-view {
         display: block;
     }
     
-    .artifact-id-badge.artifact-id-code {
-        left: -20px;
-        font-size: 12px;
+    .app-container.split-view .main-content {
+        width: 100%;
+    }
+    
+    .app-container.split-view .code-panel {
+        position: fixed;
+        width: 100%;
+        height: calc(100vh - 56px);
+        top: 56px;
+        z-index: 1060;
     }
 }
 
-/* Animation for panel opening */
-@keyframes slideInRight {
+/* Animation for smooth transitions */
+@keyframes slideInFromRight {
     from {
-        right: -50%;
+        transform: translateX(100%);
     }
     to {
-        right: 0;
+        transform: translateX(0);
+    }
+}
+
+@keyframes slideOutToRight {
+    from {
+        transform: translateX(0);
+    }
+    to {
+        transform: translateX(100%);
     }
 }
 
 .code-panel.opening {
-    animation: slideInRight 0.3s ease forwards;
+    animation: slideInFromRight 0.3s ease forwards;
+}
+
+.code-panel.closing {
+    animation: slideOutToRight 0.3s ease forwards;
+}
+
+/* Focus trap for accessibility */
+.code-panel:focus-within {
+    outline: none;
+}
+
+.code-panel .code-panel-header button:focus {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
 }

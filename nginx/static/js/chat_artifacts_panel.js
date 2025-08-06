@@ -1,9 +1,10 @@
-// FIXED Artifact panel functionality - Redis Backend with admin/jai format
+// ENHANCED Artifact panel functionality with split-view code panel
 class ChatArtifactsPanel {
     constructor() {
         this.modal = null;
         this.currentCodeArtifact = null;
         this.keyboardHandler = null;
+        this.isCodePanelOpen = false;
         this.init();
     }
     
@@ -13,7 +14,7 @@ class ChatArtifactsPanel {
             this.modal = new bootstrap.Modal(document.getElementById('artifactPanelModal'));
             this.setupEventListeners();
         });
-        console.log('Chat Artifacts Panel initialized (Redis backend, admin/jai format)');
+        console.log('Chat Artifacts Panel initialized with split-view support');
     }
     
     setupEventListeners() {
@@ -38,7 +39,7 @@ class ChatArtifactsPanel {
         }
     }
     
-    // FIXED: Refresh artifact panel data from Redis with better error handling
+    // Refresh artifact panel data from Redis with better error handling
     async refresh() {
         if (!window.chat || !window.chat.currentChatId) {
             console.warn('🔍 No current chat ID available for artifacts');
@@ -54,7 +55,7 @@ class ChatArtifactsPanel {
         }
     }
     
-    // FIXED: Update artifact statistics with direct API call
+    // Update artifact statistics with direct API call
     async updateArtifactStats() {
         if (!window.chat?.currentChatId) {
             console.warn('🔍 No current chat ID for stats');
@@ -64,7 +65,6 @@ class ChatArtifactsPanel {
         try {
             console.log('🔍 Fetching artifacts via API for chat:', window.chat.currentChatId);
             
-            // FIXED: Direct API call instead of going through chat.artifacts
             const response = await fetch(`/api/chat/artifacts?chat_id=${encodeURIComponent(window.chat.currentChatId)}`);
             if (!response.ok) {
                 throw new Error(`API error: ${response.status} ${response.statusText}`);
@@ -73,32 +73,21 @@ class ChatArtifactsPanel {
             const data = await response.json();
             const allArtifacts = data.artifacts || [];
             
-            console.log('🔍 Raw artifacts from API:', allArtifacts);
-            console.log('🔍 Artifacts count:', allArtifacts.length);
-            
-            // FIXED: Better artifact classification
             const messageArtifacts = [];
             const codeBlockArtifacts = [];
             const adminMessages = [];
             const jaiMessages = [];
             
             allArtifacts.forEach(artifact => {
-                console.log(`🔍 Processing artifact: ${artifact.id}, type: ${artifact.type}`);
-                
-                // Check if it's a code block by ID pattern
                 if (artifact.id && artifact.id.includes('_code(')) {
                     codeBlockArtifacts.push(artifact);
-                    console.log(`🔍 Code block: ${artifact.id}`);
                 } else {
-                    // It's a message artifact
                     messageArtifacts.push(artifact);
                     
                     if (artifact.type === 'admin' || (artifact.id && artifact.id.startsWith('admin('))) {
                         adminMessages.push(artifact);
-                        console.log(`🔍 Admin message: ${artifact.id}`);
                     } else if (artifact.type === 'jai' || (artifact.id && artifact.id.startsWith('jai('))) {
                         jaiMessages.push(artifact);
-                        console.log(`🔍 JAI message: ${artifact.id}`);
                     }
                 }
             });
@@ -111,9 +100,6 @@ class ChatArtifactsPanel {
                 codeBlocks: codeBlockArtifacts.length
             };
             
-            console.log('🔍 Final calculated stats:', stats);
-            
-            // Update stats display
             this.updateStatsDisplay(stats);
             
         } catch (error) {
@@ -135,7 +121,6 @@ class ChatArtifactsPanel {
             const element = document.getElementById(id);
             if (element) {
                 element.textContent = value || 0;
-                console.log(`🔍 Updated ${id}: ${value}`);
             }
         });
     }
@@ -149,7 +134,7 @@ class ChatArtifactsPanel {
         });
     }
     
-    // FIXED: Display artifacts with direct API call
+    // Display artifacts with direct API call
     async displayArtifacts() {
         const artifactList = document.getElementById('artifact-list');
         if (!artifactList) {
@@ -168,9 +153,6 @@ class ChatArtifactsPanel {
         }
         
         try {
-            console.log('🔍 Displaying artifacts for chat:', window.chat.currentChatId);
-            
-            // FIXED: Direct API call
             const response = await fetch(`/api/chat/artifacts?chat_id=${encodeURIComponent(window.chat.currentChatId)}`);
             if (!response.ok) {
                 throw new Error(`API error: ${response.status} ${response.statusText}`);
@@ -178,8 +160,6 @@ class ChatArtifactsPanel {
             
             const data = await response.json();
             const allArtifacts = data.artifacts || [];
-            
-            console.log('🔍 Artifacts to display:', allArtifacts.length);
             
             if (allArtifacts.length === 0) {
                 artifactList.innerHTML = `
@@ -198,7 +178,6 @@ class ChatArtifactsPanel {
             artifactList.innerHTML = '';
             
             allArtifacts.forEach((artifact, index) => {
-                console.log(`🔍 Creating display for artifact ${index + 1}:`, artifact.id);
                 try {
                     const artifactElement = this.createArtifactListItem(artifact);
                     if (artifactElement) {
@@ -208,8 +187,6 @@ class ChatArtifactsPanel {
                     console.error(`🔍 Error creating artifact item:`, itemError);
                 }
             });
-            
-            console.log(`🔍 Successfully displayed ${allArtifacts.length} artifacts`);
             
         } catch (error) {
             console.error('🔍 Error displaying artifacts:', error);
@@ -223,16 +200,14 @@ class ChatArtifactsPanel {
         }
     }
     
-    // FIXED: Create artifact list item with better detection
+    // Create artifact list item
     createArtifactListItem(artifact) {
         const item = document.createElement('div');
         item.className = 'artifact-item border rounded p-3 mb-2';
         item.dataset.artifactId = artifact.id;
         
-        // ROBUST: Determine if this is a code block
         const isCodeBlock = artifact.id && artifact.id.includes('_code(');
         
-        // Determine display type
         let displayType;
         if (isCodeBlock) {
             displayType = 'code_block';
@@ -277,8 +252,8 @@ class ChatArtifactsPanel {
                         <i class="bi bi-clipboard"></i>
                     </button>
                     ${isCodeBlock ? `
-                        <button class="btn btn-sm btn-outline-info" onclick="window.artifactsPanel.showCodePanel('${artifact.id}')" title="View Code">
-                            <i class="bi bi-code-square"></i>
+                        <button class="btn btn-sm btn-primary" onclick="window.artifactsPanel.showSplitViewCodePanel('${artifact.id}')" title="View in Split Panel">
+                            <i class="bi bi-layout-split"></i>
                         </button>
                     ` : ''}
                     <button class="btn btn-sm btn-outline-success" onclick="window.artifactsPanel.jumpToArtifact('${artifact.id}')" title="Jump to Message">
@@ -318,17 +293,14 @@ class ChatArtifactsPanel {
         }
     }
     
-    // NEW: Show code panel for code blocks
-    async showCodePanel(artifactId) {
+    // ENHANCED: Show code panel in split view mode
+    async showSplitViewCodePanel(artifactId) {
         try {
-            console.log('🔍 Showing code panel for:', artifactId);
+            console.log('🔍 Opening split-view code panel for:', artifactId);
             
-            // FIXED: Close the artifacts modal first if it's open
+            // Close the artifacts modal first
             if (this.modal && this.modal._element && this.modal._element.classList.contains('show')) {
-                console.log('🔍 Closing artifacts modal to show code panel');
                 this.modal.hide();
-                
-                // Wait for modal to close before showing code panel
                 await new Promise(resolve => {
                     const modalElement = this.modal._element;
                     const onHidden = () => {
@@ -337,9 +309,6 @@ class ChatArtifactsPanel {
                     };
                     modalElement.addEventListener('hidden.bs.modal', onHidden);
                 });
-                
-                // Small additional delay to ensure clean transition
-                await new Promise(resolve => setTimeout(resolve, 150));
             }
             
             // Fetch the specific artifact
@@ -355,52 +324,55 @@ class ChatArtifactsPanel {
                 throw new Error('Artifact not found');
             }
             
-            // Create and show code panel
-            this.createCodePanel(artifact);
+            // Create split-view code panel
+            this.createSplitViewCodePanel(artifact);
             
         } catch (error) {
-            console.error('🔍 Error showing code panel:', error);
+            console.error('🔍 Error showing split-view code panel:', error);
             if (window.chat && window.chat.ui) {
                 window.chat.ui.showToast('Failed to load code block', 'error');
             }
         }
     }
     
-    // ENHANCED: Create code panel with full features
-    createCodePanel(artifact) {
-        // Remove existing code panel
-        this.closeCodePanel();
+    // ENHANCED: Create split-view code panel that doesn't overlay
+    createSplitViewCodePanel(artifact) {
+        console.log('🔍 Creating split-view code panel for:', artifact.id);
+        
+        // Close any existing code panel first
+        this.closeSplitViewCodePanel();
         
         const code = artifact.code || artifact.content || '';
         const language = artifact.language || '';
         
-        // Create backdrop for mobile
-        const backdrop = document.createElement('div');
-        backdrop.id = 'code-panel-backdrop';
-        backdrop.className = 'code-panel-backdrop';
-        backdrop.onclick = () => this.closeCodePanel();
+        // ENHANCED: Hide sidebar and enable split view mode
+        this.enableSplitViewMode();
         
-        // Create code panel HTML
+        // Create the split-view code panel
         const panel = document.createElement('div');
-        panel.id = 'code-panel';
-        panel.className = 'code-panel';
+        panel.id = 'split-code-panel';
+        panel.className = 'code-panel show'; // Always show in split mode
+        
         panel.innerHTML = `
             <div class="code-panel-header">
                 <div class="code-panel-title">
-                    <i class="bi bi-code-square"></i>
+                    <i class="bi bi-layout-split"></i>
                     <strong>${artifact.id}</strong>
                     ${language ? `<span class="badge bg-info ms-2">${language}</span>` : ''}
-                    <small class="text-muted ms-2">(${code.split('\n').length} lines)</small>
+                    <small class="text-muted ms-2">(${code.split('\n').length} lines, Split View)</small>
                 </div>
                 <div class="code-panel-actions">
                     <button class="btn btn-sm btn-outline-secondary" onclick="window.artifactsPanel.copyCodeContent('${artifact.id}')" title="Copy Code">
                         <i class="bi bi-clipboard"></i> Copy
                     </button>
                     <button class="btn btn-sm btn-outline-info" onclick="window.artifactsPanel.downloadCode('${artifact.id}')" title="Download">
-                        <i class="bi bi-download"></i>
+                        <i class="bi bi-download"></i> Download
                     </button>
-                    <button class="btn btn-sm btn-outline-danger" onclick="window.artifactsPanel.closeCodePanel()" title="Close">
-                        <i class="bi bi-x"></i>
+                    <button class="btn btn-sm btn-outline-warning" onclick="window.artifactsPanel.toggleFullscreen()" title="Toggle Fullscreen">
+                        <i class="bi bi-arrows-fullscreen"></i> Fullscreen
+                    </button>
+                    <button class="btn btn-sm btn-outline-danger" onclick="window.artifactsPanel.closeSplitViewCodePanel()" title="Close Split View">
+                        <i class="bi bi-x-lg"></i> Close
                     </button>
                 </div>
             </div>
@@ -409,16 +381,8 @@ class ChatArtifactsPanel {
             </div>
         `;
         
-        // Add backdrop and panel to page
-        document.body.appendChild(backdrop);
+        // Add panel to the body (will be positioned by CSS)
         document.body.appendChild(panel);
-        
-        // Animate in
-        setTimeout(() => {
-            backdrop.classList.add('show');
-            panel.classList.add('show');
-            panel.classList.add('opening');
-        }, 10);
         
         // Apply syntax highlighting if Prism is available
         if (window.Prism) {
@@ -430,35 +394,152 @@ class ChatArtifactsPanel {
             }, 100);
         }
         
-        // Store current artifact for copy function
+        // Store current artifact for other functions
         this.currentCodeArtifact = artifact;
+        this.isCodePanelOpen = true;
         
         // Add keyboard support
         this.addCodePanelKeyboardSupport();
         
-        console.log('🔍 Code panel created and animated for:', artifact.id);
+        // Add resize functionality
+        this.addResizeSupport();
+        
+        console.log('🔍 Split-view code panel created for:', artifact.id);
     }
     
-    // Enhanced close with animation
-    closeCodePanel() {
-        const panel = document.getElementById('code-panel');
-        const backdrop = document.getElementById('code-panel-backdrop');
+    // ENHANCED: Enable split view mode
+    enableSplitViewMode() {
+        const appContainer = document.querySelector('.app-container');
+        const sidebar = document.querySelector('.sidebar');
+        
+        if (appContainer) {
+            appContainer.classList.add('split-view');
+        }
+        
+        // Hide sidebar in split view
+        if (sidebar) {
+            sidebar.classList.add('collapsed');
+        }
+        
+        console.log('🔍 Split view mode enabled');
+    }
+    
+    // ENHANCED: Disable split view mode
+    disableSplitViewMode() {
+        const appContainer = document.querySelector('.app-container');
+        const sidebar = document.querySelector('.sidebar');
+        
+        if (appContainer) {
+            appContainer.classList.remove('split-view');
+        }
+        
+        // Show sidebar again (user can toggle if needed)
+        if (sidebar) {
+            sidebar.classList.remove('collapsed');
+        }
+        
+        console.log('🔍 Split view mode disabled');
+    }
+    
+    // ENHANCED: Close split view code panel
+    closeSplitViewCodePanel() {
+        const panel = document.getElementById('split-code-panel');
         
         if (panel) {
-            panel.classList.remove('show');
-            setTimeout(() => panel.remove(), 300);
+            // Animate out
+            panel.classList.add('closing');
+            
+            setTimeout(() => {
+                panel.remove();
+                this.disableSplitViewMode();
+                this.isCodePanelOpen = false;
+                this.currentCodeArtifact = null;
+                this.removeCodePanelKeyboardSupport();
+                console.log('🔍 Split-view code panel closed');
+            }, 300);
+        } else {
+            this.disableSplitViewMode();
+            this.isCodePanelOpen = false;
         }
-        
-        if (backdrop) {
-            backdrop.classList.remove('show');
-            setTimeout(() => backdrop.remove(), 300);
-        }
-        
-        this.currentCodeArtifact = null;
-        this.removeCodePanelKeyboardSupport();
     }
     
-    // NEW: Download code functionality
+    // NEW: Toggle fullscreen mode for code panel
+    toggleFullscreen() {
+        const panel = document.getElementById('split-code-panel');
+        if (!panel) return;
+        
+        const appContainer = document.querySelector('.app-container');
+        
+        if (panel.classList.contains('fullscreen')) {
+            // Exit fullscreen
+            panel.classList.remove('fullscreen');
+            if (appContainer) {
+                appContainer.classList.add('split-view');
+            }
+        } else {
+            // Enter fullscreen
+            panel.classList.add('fullscreen');
+            if (appContainer) {
+                appContainer.classList.remove('split-view');
+            }
+        }
+    }
+    
+    // NEW: Add resize support for split view
+    addResizeSupport() {
+        // Create resize handle
+        const resizer = document.createElement('div');
+        resizer.className = 'split-view-resizer';
+        resizer.id = 'split-resizer';
+        
+        const panel = document.getElementById('split-code-panel');
+        if (panel) {
+            panel.parentNode.insertBefore(resizer, panel);
+            
+            let isResizing = false;
+            
+            resizer.addEventListener('mousedown', (e) => {
+                isResizing = true;
+                document.addEventListener('mousemove', handleResize);
+                document.addEventListener('mouseup', stopResize);
+            });
+            
+            function handleResize(e) {
+                if (!isResizing) return;
+                
+                const containerWidth = window.innerWidth;
+                const newPanelWidth = containerWidth - e.clientX;
+                const minWidth = 300;
+                const maxWidth = containerWidth - 300;
+                
+                const clampedWidth = Math.max(minWidth, Math.min(maxWidth, newPanelWidth));
+                const percentage = (clampedWidth / containerWidth) * 100;
+                
+                if (panel) {
+                    panel.style.width = percentage + '%';
+                }
+                
+                const mainContent = document.querySelector('.main-content');
+                if (mainContent) {
+                    mainContent.style.width = (100 - percentage) + '%';
+                }
+            }
+            
+            function stopResize() {
+                isResizing = false;
+                document.removeEventListener('mousemove', handleResize);
+                document.removeEventListener('mouseup', stopResize);
+            }
+        }
+    }
+    
+    // BACKWARDS COMPATIBILITY: Keep old showCodePanel method for existing calls
+    async showCodePanel(artifactId) {
+        // Redirect to split view version
+        await this.showSplitViewCodePanel(artifactId);
+    }
+    
+    // Download code functionality
     downloadCode(artifactId) {
         try {
             if (this.currentCodeArtifact && this.currentCodeArtifact.id === artifactId) {
@@ -489,12 +570,12 @@ class ChatArtifactsPanel {
         }
     }
     
-    // NEW: Keyboard support for code panel
+    // Keyboard support for code panel
     addCodePanelKeyboardSupport() {
         this.keyboardHandler = (e) => {
             switch(e.key) {
                 case 'Escape':
-                    this.closeCodePanel();
+                    this.closeSplitViewCodePanel();
                     break;
                 case 'c':
                     if (e.ctrlKey || e.metaKey) {
@@ -512,6 +593,12 @@ class ChatArtifactsPanel {
                         }
                     }
                     break;
+                case 'f':
+                    if (e.ctrlKey || e.metaKey) {
+                        e.preventDefault();
+                        this.toggleFullscreen();
+                    }
+                    break;
             }
         };
         
@@ -526,7 +613,7 @@ class ChatArtifactsPanel {
         }
     }
     
-    // NEW: Copy code content
+    // Copy code content
     async copyCodeContent(artifactId) {
         try {
             if (this.currentCodeArtifact && this.currentCodeArtifact.id === artifactId) {
@@ -587,7 +674,12 @@ class ChatArtifactsPanel {
     
     // Jump to artifact in chat
     jumpToArtifact(artifactId) {
-        // Close the modal first
+        // Close any open panels first
+        if (this.isCodePanelOpen) {
+            this.closeSplitViewCodePanel();
+        }
+        
+        // Close the modal if open
         if (this.modal) {
             this.modal.hide();
         }
@@ -646,19 +738,14 @@ class ChatArtifactsPanel {
 // Initialize artifacts panel
 window.artifactsPanel = new ChatArtifactsPanel();
 
-// Initialize auto-close on outside click for desktop
+// ENHANCED: Initialize with split view support and cleanup on page unload
 document.addEventListener('DOMContentLoaded', () => {
-    document.addEventListener('click', (e) => {
-        const panel = document.getElementById('code-panel');
-        const clickedButton = e.target.closest('.code-block-btn, .code-block-overlay');
-        
-        if (panel && !panel.contains(e.target) && !clickedButton) {
-            // Only auto-close on desktop
-            if (window.innerWidth > 768) {
-                window.artifactsPanel?.closeCodePanel();
-            }
-        }
-    });
-    
-    console.log('🔍 Code panel auto-close initialized');
+    console.log('🔍 Enhanced artifacts panel with split view loaded');
+});
+
+// Cleanup on page unload
+window.addEventListener('beforeunload', () => {
+    if (window.artifactsPanel && window.artifactsPanel.isCodePanelOpen) {
+        window.artifactsPanel.closeSplitViewCodePanel();
+    }
 });
